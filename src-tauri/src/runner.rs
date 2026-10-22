@@ -35,6 +35,9 @@ pub struct Step {
     pub ready: Vec<String>,
     /// Read the service's port from the first local URL in its output (`find_local_port`).
     pub learn_port: bool,
+    /// The checkout the app belongs to. Build steps of apps in the same checkout run one at a time, since apps of one
+    /// solution build the projects they share into the same `obj` and `bin` folders.
+    pub checkout: PathBuf,
 }
 
 struct Live {
@@ -54,6 +57,8 @@ pub struct Hub {
     live: Mutex<HashMap<String, Live>>,
     logs: Mutex<VecDeque<LogLine>>,
     last_level: Mutex<HashMap<String, Level>>,
+    /// One lock per checkout, held while any of its apps builds.
+    builds: Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>,
     seq: AtomicU64,
     job: Job,
     emit: Box<dyn Fn(HubEvent) + Send + Sync>,
@@ -82,6 +87,7 @@ impl Hub {
             live: Mutex::new(HashMap::new()),
             logs: Mutex::new(VecDeque::new()),
             last_level: Mutex::new(HashMap::new()),
+            builds: Mutex::new(HashMap::new()),
             seq: AtomicU64::new(1),
             job: Job::new(),
             emit: Box::new(emit),
@@ -457,6 +463,18 @@ async fn run_plan(ctx: Ctx, plan: Vec<Step>, mut stop_rx: oneshot::Receiver<()>)
     for (i, step) in plan.iter().enumerate() {
         let service = i == last;
         ctx.hub.set_state(&ctx.id, if service { InstanceState::Starting } else { InstanceState::Building });
+        let _build_turn = if service {
+            None
+        } else {
+            match wait_for_build_turn(&ctx, &step.checkout, &mut stop_rx).await {
+                Some(turn) => Some(turn),
+                None => {
+                    ctx.sys("stopped");
+                    ctx.hub.set_state(&ctx.id, InstanceState::Exited { code: None });
+                    return;
+                }
+            }
+        };
         ctx.sys(format!("> {} {}", step.program.display(), step.args.join(" ")));
         let started = Instant::now();
         match run_step(&ctx, step, service, &mut stop_rx).await {
@@ -487,6 +505,23 @@ async fn run_plan(ctx: Ctx, plan: Vec<Step>, mut stop_rx: oneshot::Receiver<()>)
                 return;
             }
         }
+    }
+}
+
+/// Waits until no other app of the checkout is building. `None` when the app was stopped while it waited.
+async fn wait_for_build_turn(
+    ctx: &Ctx,
+    checkout: &Path,
+    stop_rx: &mut oneshot::Receiver<()>,
+) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+    let lock = ctx.hub.builds.lock().unwrap().entry(checkout.to_path_buf()).or_default().clone();
+    if let Ok(turn) = lock.clone().try_lock_owned() {
+        return Some(turn);
+    }
+    ctx.sys("waiting for another build in this checkout to finish");
+    tokio::select! {
+        turn = lock.lock_owned() => Some(turn),
+        _ = stop_rx => None,
     }
 }
 
@@ -717,6 +752,7 @@ pub fn launch_plan(project: &Path, app: &AppDef) -> Result<Vec<Step>, String> {
                 cwd,
                 ready: if task { Vec::new() } else { spec.ready.clone() },
                 learn_port: app.learn_port && !task && app.port.is_none(),
+                checkout: project.to_path_buf(),
             })
         })
         .collect()
@@ -774,6 +810,7 @@ mod tests {
             cwd: std::env::temp_dir(),
             ready: ready.iter().map(|r| r.to_string()).collect(),
             learn_port: false,
+            checkout: "C:/dev/shared".into(),
         }
     }
 
@@ -854,6 +891,24 @@ mod tests {
         run_plan(ctx, vec![cmd_step("exit 1", &[]), cmd_step("echo should-not-run", &[])], rx).await;
         assert!(matches!(hub.states()["b"], InstanceState::Failed { .. }));
         assert!(!seen.lock().unwrap().iter().any(|s| s.contains("should-not-run")));
+    }
+
+    #[tokio::test]
+    async fn apps_of_one_checkout_build_one_at_a_time() {
+        let (hub, seen) = collector();
+        let (first, _tx1, rx1) = register(&hub, "first");
+        let (second, _tx2, rx2) = register(&hub, "second");
+        let slow = vec![cmd_step("ping -n 3 127.0.0.1 >nul", &[]), cmd_step("echo first-up", &["first-up"])];
+        let quick = vec![cmd_step("exit 0", &[]), cmd_step("echo second-up", &["second-up"])];
+        let a = tokio::spawn(run_plan(first, slow, rx1));
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let b = tokio::spawn(run_plan(second, quick, rx2));
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(hub.states()["second"], InstanceState::Building);
+        assert!(seen.lock().unwrap().iter().any(|s| s.contains("waiting for another build")));
+        a.await.unwrap();
+        b.await.unwrap();
+        assert_eq!(hub.states()["second"], InstanceState::Exited { code: Some(0) });
     }
 
     #[tokio::test]

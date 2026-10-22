@@ -38,8 +38,9 @@ pub fn can_watch(app: &AppDef) -> bool {
     app.kind == "dotnet-run"
 }
 
-/// Turns the app's `dotnet run --project X` into `dotnet watch --non-interactive --project X run`. Non-interactive
-/// makes a change that cannot be hot-reloaded restart the app, since there is no terminal to ask in.
+/// Turns the app's `dotnet run --project X --no-build` into `dotnet watch --non-interactive --project X run`. Non-interactive
+/// makes a change that cannot be hot-reloaded restart the app, since there is no terminal to ask in. Watch builds on
+/// its own, so `--no-build` goes; the build step before it still runs first, in its turn.
 pub fn watching(app: &mut AppDef) {
     if !can_watch(app) {
         return;
@@ -48,7 +49,7 @@ pub fn watching(app: &mut AppDef) {
     if step.args.first().map(String::as_str) != Some("run") {
         return;
     }
-    let rest = step.args.split_off(1);
+    let rest = step.args.split_off(1).into_iter().filter(|a| a != "--no-build");
     step.args = ["watch", "--non-interactive"].map(String::from).into_iter().chain(rest).chain(["run".to_string()]).collect();
     app.kind = WATCHED_KIND.into();
 }
@@ -64,7 +65,8 @@ mod tests {
         let mut app = app_def(Flavor::DotnetRun, "src/Web/Web.csproj", "Web", None);
         watching(&mut app);
         assert_eq!(app.kind, "dotnet-watch");
-        let [step] = app.steps.as_slice() else { panic!("one step") };
+        let [build, step] = app.steps.as_slice() else { panic!("a build step and a run step") };
+        assert_eq!(build.args[0], "build");
         assert_eq!(step.args, ["watch", "--non-interactive", "--project", "Web.csproj", "run"]);
         assert_eq!(step.cwd, "src/Web");
         assert_eq!(step.ready, ["Now listening on", "Application started"], "watch passes the app's own output through");

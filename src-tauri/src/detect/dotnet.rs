@@ -74,9 +74,14 @@ pub fn app_def(flavor: Flavor, rel: &str, name: &str, port: Option<u16>) -> AppD
         ready: ready.iter().map(|r| r.to_string()).collect(),
     };
     let (kind, steps) = match flavor {
+        // Built apart from the run so the build can wait its turn: apps of one solution build the projects they share
+        // into the same folders, and two builds at once fail on locked files.
         Flavor::DotnetRun => (
             "dotnet-run",
-            vec![step(Program::path("dotnet"), &["run", "--project", file], &["Now listening on", "Application started"])],
+            vec![
+                step(Program::path("dotnet"), &["build", file, "-nologo", "-consoleloggerparameters:ErrorsOnly"], &[]),
+                step(Program::path("dotnet"), &["run", "--project", file, "--no-build"], &["Now listening on", "Application started"]),
+            ],
         ),
         Flavor::IisExpress => (
             "iis-express",
@@ -159,10 +164,13 @@ mod tests {
     fn dotnet_run_app_launches_from_the_project_folder_and_holds_no_machine_path() {
         let app = app_def(Flavor::DotnetRun, "src/Api/Api.csproj", "Api", None);
         assert_eq!((app.id.as_str(), app.kind.as_str(), app.mode, app.check_port), ("src/Api/Api.csproj", "dotnet-run", AppMode::Service, false));
-        let [step] = app.steps.as_slice() else { panic!("one step") };
-        assert_eq!(step.program, Program::path("dotnet"));
-        assert_eq!((step.args.as_slice(), step.cwd.as_str()), (["run", "--project", "Api.csproj"].map(String::from).as_slice(), "src/Api"));
-        assert_eq!(step.ready, ["Now listening on", "Application started"]);
+        let [build, run] = app.steps.as_slice() else { panic!("a build step and a run step") };
+        assert_eq!(build.program, Program::path("dotnet"));
+        assert_eq!((build.args[..2].to_vec(), build.cwd.as_str()), (["build", "Api.csproj"].map(String::from).to_vec(), "src/Api"));
+        assert!(build.ready.is_empty());
+        assert_eq!(run.program, Program::path("dotnet"));
+        assert_eq!((run.args.as_slice(), run.cwd.as_str()), (["run", "--project", "Api.csproj", "--no-build"].map(String::from).as_slice(), "src/Api"));
+        assert_eq!(run.ready, ["Now listening on", "Application started"]);
     }
 
     #[test]
