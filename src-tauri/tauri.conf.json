@@ -38,7 +38,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_WITH_UPDATER_PUBKEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVBQTY4OUYwNDc5NjFGMEIKUldRTEg1Wkg4SW1tNnZYc1hQSkM4K05LUkEvK1M3czhlRm1tWU9IZWQ3azg4eEk0L0MzZTdLYzUK",
       "endpoints": ["https://github.com/uFleck/spawner/releases/latest/download/latest.json"],
       "windows": {
         "installMode": "passive"
