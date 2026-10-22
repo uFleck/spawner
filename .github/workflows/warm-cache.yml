@@ -1,0 +1,53 @@
+name: Warm Rust cache
+
+# Tag runs can only restore caches saved on the default branch, so release.yml reads the cache this workflow writes.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/tauri.conf.json"
+      - ".github/workflows/warm-cache.yml"
+  schedule:
+    # GitHub evicts caches unused for 7 days; this keeps it alive between releases.
+    - cron: "0 6 * * 1,4"
+  workflow_dispatch:
+
+concurrency:
+  group: warm-cache
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: release
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Same command the release runs, so dependencies compile with the same features and profile.
+      # Updater artifacts are off because they need the signing key, and nothing is bundled here.
+      - name: Build dependencies
+        shell: pwsh
+        run: |
+          '{"bundle":{"createUpdaterArtifacts":false}}' | Set-Content -Path "$env:RUNNER_TEMP/no-updater.json" -Encoding utf8
+          pnpm tauri build --no-bundle --config "$env:RUNNER_TEMP/no-updater.json"
