@@ -52,6 +52,8 @@ function PresetRow({ preset, snap }: { preset: Preset; snap: Snapshot }) {
   const dot = allUp && !busy ? "running" : live.length ? "starting" : "idle";
   const where = targetLabel(preset, snap.groups);
   const targets = targetsFor(preset, snap.groups);
+  // Before the first scan nothing resolves, which says nothing about the apps themselves.
+  const scanning = !snap.scanned;
 
   if (renaming)
     return (
@@ -79,7 +81,7 @@ function PresetRow({ preset, snap }: { preset: Preset; snap: Snapshot }) {
   return (
     <li
       className="preset-row"
-      data-state={dot}
+      data-state={scanning ? "scanning" : dot}
       onContextMenu={(e) =>
         menu.show(e, [
           allUp
@@ -105,19 +107,28 @@ function PresetRow({ preset, snap }: { preset: Preset; snap: Snapshot }) {
             <>
               <span className="mem">{preset.members.map((m) => m.name).join(" · ")}</span>
               <span> · </span>
-              <a
-                href="#"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  pickTarget(e);
-                }}
-              >
-                {where}
-              </a>
+              {scanning ? (
+                <span className="scan-note">scanning…</span>
+              ) : (
+                <a
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    pickTarget(e);
+                  }}
+                >
+                  {where}
+                </a>
+              )}
             </>
           )}
-          {missing.length > 0 && <span className="warn-text"> · {missing.length} missing</span>}
+          {!scanning && missing.length > 0 && (
+            <span className="warn-text" title={`Not found in the scanned folders: ${missing.map((m) => `${m.name} (${m.repo})`).join(", ")}`}>
+              {" "}
+              · {missing.length} missing
+            </span>
+          )}
         </div>
       </div>
       <div className="acts">
@@ -126,14 +137,14 @@ function PresetRow({ preset, snap }: { preset: Preset; snap: Snapshot }) {
           className="hov"
           icon="ph ph-arrow-clockwise"
           label="Restart preset"
-          disabled={hits.length === 0}
+          disabled={scanning || hits.length === 0}
           onClick={() => void actions.restartPreset(preset)}
         />
         <IconButton
           icon={allUp ? "ph-fill ph-stop" : "ph-fill ph-play"}
           className={allUp ? "danger" : ""}
-          label={allUp ? "Stop preset" : live.length ? "Start the rest" : "Run preset"}
-          disabled={hits.length === 0}
+          label={scanning ? "Scanning folders…" : allUp ? "Stop preset" : live.length ? "Start the rest" : "Run preset"}
+          disabled={scanning || hits.length === 0}
           onClick={() => void (allUp ? actions.stopPreset(preset) : actions.runPreset(preset))}
         />
       </div>

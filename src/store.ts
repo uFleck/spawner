@@ -85,6 +85,8 @@ export interface Snapshot {
   mcp: McpInfo | null;
   settings: Settings;
   loading: boolean;
+  /** Whether the first scan has finished. Until then `groups` is empty because nothing was looked at yet, not because the folders are gone. */
+  scanned: boolean;
   error: string | null;
   /** The app whose start failed on a busy port, so the alert can offer to start it anyway. */
   portConflict: { projectId: string; appId: string } | null;
@@ -129,6 +131,7 @@ let snapshot: Snapshot = {
   mcp: null,
   settings: { notifyScripts: false },
   loading: true,
+  scanned: false,
   error: null,
   portConflict: null,
   runAsk: null,
@@ -489,9 +492,9 @@ export const actions = {
   async refresh() {
     set({ loading: true });
     try {
-      set({ groups: await api.scan(), loading: false, error: null });
+      set({ groups: await api.scan(), loading: false, scanned: true, error: null });
     } catch (e) {
-      set({ loading: false });
+      set({ loading: false, scanned: true });
       fail(e);
     }
   },
@@ -624,7 +627,7 @@ export async function initStore() {
   await listen<StateEvent>("instance-state", (e) => onState(e.payload));
   await listen<PortEvent>("instance-port", (e) => onPort(e.payload));
   await listen<LogLine>("log-line", (e) => enqueueLog(e.payload));
-  await listen<Group[]>("groups-changed", (e) => set({ groups: e.payload }));
+  await listen<Group[]>("groups-changed", (e) => set({ groups: e.payload, scanned: true }));
   void watchMcp();
   await loadUiState();
   set({ roots: await api.getRoots() });

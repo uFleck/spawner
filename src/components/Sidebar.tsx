@@ -453,7 +453,25 @@ function Scripts({
   );
 }
 
-function Folders({ roots }: { roots: Root[] }) {
+/** Placeholder rows for the first scan, so the tree reads as being filled in rather than empty. */
+function ScanningRows() {
+  return (
+    <div className="scanning" role="status" aria-live="polite">
+      <div className="scanning-t">
+        <i className="ph-bold ph-circle-notch spin" aria-hidden="true" />
+        Scanning folders…
+      </div>
+      {[62, 48, 56].map((w) => (
+        <div className="skel-row" key={w} aria-hidden="true">
+          <span className="skel-dot" />
+          <span className="skel-bar" style={{ width: `${w}%` }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Folders({ roots, pending }: { roots: Root[]; pending: boolean }) {
   const [closed, setClosed] = useState(true);
   const menu = useContextMenu();
   return (
@@ -494,7 +512,7 @@ function Folders({ roots }: { roots: Root[] }) {
                 <IconButton small icon="ph ph-x" label="Remove folder" onClick={() => void actions.removeRoot(r.path)} />
               </li>
             ))}
-            {roots.length === 0 && <li className="root-none">No folders yet</li>}
+            {roots.length === 0 && <li className="root-none">{pending ? "Loading folders…" : "No folders yet"}</li>}
           </ul>
         </div>
       </div>
@@ -698,8 +716,9 @@ export function Sidebar({ snap, theme, onSolo, onTheme, onGuide, onLogoClick, on
           {worktrees.map((g) => (
             <GroupBlock key={g.id} group={g} snap={snap} onSolo={onSolo} expand={keep !== null} />
           ))}
+          {!snap.scanned && snap.roots.length > 0 && <ScanningRows />}
           {groups.length === 0 && snap.groups.length > 0 && (keep || text) && <p className="empty">No apps match.</p>}
-          {!snap.loading && snap.roots.length > 0 && (
+          {snap.scanned && !snap.loading && snap.roots.length > 0 && (
             <Scripts groups={scripts} snap={snap} onSolo={onSolo} onToast={onToast} filtering={keep !== null || text !== ""} />
           )}
           {!snap.loading && snap.roots.length === 0 && (
@@ -710,13 +729,13 @@ export function Sidebar({ snap, theme, onSolo, onTheme, onGuide, onLogoClick, on
               </button>
             </div>
           )}
-          {!snap.loading && snap.roots.length > 0 && snap.groups.length === 0 && (
+          {snap.scanned && !snap.loading && snap.roots.length > 0 && snap.groups.length === 0 && (
             <p className="empty">No runnable apps found in the added folders.</p>
           )}
         </div>
       </div>
       <UndoToasts undos={snap.undos} />
-      <Folders roots={snap.roots} />
+      <Folders roots={snap.roots} pending={!snap.scanned} />
     </aside>
   );
 }
