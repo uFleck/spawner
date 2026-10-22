@@ -1,13 +1,15 @@
-import { ask } from "@tauri-apps/plugin-dialog";
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { isActive } from "../api";
 import { actions, type Snapshot } from "../store";
+import { Dialog } from "./ConcludeDialog";
 import { checkForUpdates, download, getSnapshot, restart, startUpdateChecks, subscribe, type ReleaseNote } from "../updater";
 
 /** How long a manual check's result stays on the button. */
 const NOTE_MS = 3_000;
 /** How long the popover lingers after the pointer leaves, so it can be reached. */
 const CLOSE_MS = 150;
+
+const noop = () => undefined;
 
 const shortDate = (iso: string) => {
   const d = new Date(iso);
@@ -52,6 +54,8 @@ export function UpdateButton({ snap }: { snap: Snapshot }) {
   const upd = useSyncExternalStore(subscribe, getSnapshot);
   const [note, setNote] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const noteTimer = useRef<number | undefined>(undefined);
   const closeTimer = useRef<number | undefined>(undefined);
 
@@ -71,25 +75,21 @@ export function UpdateButton({ snap }: { snap: Snapshot }) {
     noteTimer.current = window.setTimeout(() => setNote(null), NOTE_MS);
   }
 
+  const running = Object.values(snap.states).filter(isActive).length;
+
   async function restartNow() {
-    const running = Object.values(snap.states).filter(isActive).length;
+    setStopping(true);
     try {
-      if (running > 0) {
-        const ok = await ask(`${running} running app${running === 1 ? "" : "s"} will be stopped.`, {
-          title: "Restart to update",
-          kind: "warning",
-          okLabel: "Restart",
-          cancelLabel: "Cancel",
-        });
-        if (!ok) return;
-        await actions.stopAllAndWait();
-      }
+      if (running > 0) await actions.stopAllAndWait();
+      await restart();
     } catch (e) {
-      console.warn("restart cancelled", e);
-      return;
+      console.warn("restart failed", e);
+      setStopping(false);
+      setConfirming(false);
     }
-    await restart();
   }
+
+  const closeConfirm = useCallback(() => setConfirming(false), []);
 
   const enter = () => {
     window.clearTimeout(closeTimer.current);
@@ -131,7 +131,7 @@ export function UpdateButton({ snap }: { snap: Snapshot }) {
       break;
     case "ready":
       button = (
-        <button type="button" className="upd ready" onClick={() => void restartNow()}>
+        <button type="button" className="upd ready" onClick={() => (running > 0 ? setConfirming(true) : void restartNow())}>
           {icon}
           restart to update
         </button>
@@ -159,16 +159,42 @@ export function UpdateButton({ snap }: { snap: Snapshot }) {
   }
 
   return (
-    <span className="upd-wrap" onPointerEnter={enter} onPointerLeave={leave} onFocus={enter} onBlur={leave}>
-      {button}
-      {upd.kind === "available" && open && (
-        <div className="upd-pop">
-          {upd.notes.map((n) => (
-            <Release key={n.version} note={n} />
-          ))}
-          <div className="upd-foot">Click to download</div>
-        </div>
+    <>
+      <span className="upd-wrap" onPointerEnter={enter} onPointerLeave={leave} onFocus={enter} onBlur={leave}>
+        {button}
+        {upd.kind === "available" && open && (
+          <div className="upd-pop">
+            {upd.notes.map((n) => (
+              <Release key={n.version} note={n} />
+            ))}
+            <div className="upd-foot">Click to download</div>
+          </div>
+        )}
+      </span>
+      {confirming && upd.kind === "ready" && (
+        <Dialog
+          tone="warn"
+          icon="ph-fill ph-warning"
+          title="Restart to update"
+          lead={`${running} running app${running === 1 ? "" : "s"} will be stopped.`}
+          onClose={stopping ? noop : closeConfirm}
+          footer={
+            <>
+              <button type="button" className="btn btn-ghost" disabled={stopping} onClick={closeConfirm}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-primary" data-first disabled={stopping} onClick={() => void restartNow()}>
+                {stopping ? "Restarting…" : "Restart"}
+              </button>
+            </>
+          }
+        >
+          <p className="dlg-note">
+            <i className="ph ph-arrow-circle-up" aria-hidden="true" />
+            Spawner installs v{upd.version} and reopens.
+          </p>
+        </Dialog>
       )}
-    </span>
+    </>
   );
 }

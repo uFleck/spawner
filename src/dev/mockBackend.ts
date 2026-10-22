@@ -418,7 +418,6 @@ export function installMock() {
         return cb++;
       }
       if (cmd.startsWith("plugin:event|")) return undefined;
-      if (cmd === "plugin:dialog|message") return "Yes";
       if (cmd === "plugin:dialog|open") return SAMPLE_FOLDERS[nextFolder++ % SAMPLE_FOLDERS.length];
       const fn = commands[cmd];
       if (!fn) throw new Error(`mock: unknown command ${cmd}`);
