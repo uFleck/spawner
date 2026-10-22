@@ -31,7 +31,7 @@ export function StatusBar({ snap, follow, onGuide }: { snap: Snapshot; follow: b
         </span>
       )}
       <span className="sp" />
-      <UpdateButton snap={snap} />
+      {import.meta.env.PROD && <UpdateButton snap={snap} />}
       {mcp && (
         <button
           type="button"

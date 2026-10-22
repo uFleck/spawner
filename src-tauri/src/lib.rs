@@ -37,6 +37,20 @@ fn env_roots() -> Option<String> {
     std::env::var("SPAWNER_ROOT").or_else(|_| std::env::var("UMBLER_ROOT")).ok()
 }
 
+/// A debug build gets its own identifier, so it runs beside an installed Spawner: its own single-instance lock,
+/// its own app data directory (roots, MCP port file) and a "(dev)" window title.
+fn context() -> tauri::Context {
+    let mut context = tauri::generate_context!();
+    if cfg!(debug_assertions) {
+        let config = context.config_mut();
+        config.identifier.push_str(".dev");
+        for window in &mut config.app.windows {
+            window.title.push_str(" (dev)");
+        }
+    }
+    context
+}
+
 /// A file in Spawner's app data directory, next to `mcp-port.txt`.
 fn data_file(app: &AppHandle, name: &str) -> tauri::Result<PathBuf> {
     Ok(app.path().app_data_dir()?.join(name))
@@ -359,7 +373,7 @@ pub fn run() {
             logs_since,
             clear_logs
         ])
-        .build(tauri::generate_context!())
+        .build(context())
         .expect("error while building tauri application");
 
     app.run(|handle, event| {
