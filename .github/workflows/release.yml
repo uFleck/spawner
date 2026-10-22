@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Check signing key secret
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            Write-Error "Secret TAURI_SIGNING_PRIVATE_KEY is empty or not set. Add it under Settings > Secrets and variables > Actions (and TAURI_SIGNING_PRIVATE_KEY_PASSWORD if the key has a password)."
+            exit 1
+          }
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set version from tag
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+([-+].+)?$') {
+            Write-Error "Tag '${{ github.ref_name }}' is not a valid semver version (expected vX.Y.Z)."
+            exit 1
+          }
+          "APP_VERSION=$version" >> $env:GITHUB_ENV
+          $env:APP_VERSION = $version
+          @'
+          const fs = require("fs");
+          const v = process.env.APP_VERSION;
+          for (const f of ["src-tauri/tauri.conf.json", "package.json"]) {
+            const j = JSON.parse(fs.readFileSync(f, "utf8"));
+            j.version = v;
+            fs.writeFileSync(f, JSON.stringify(j, null, 2) + "\n");
+          }
+          // Cargo.toml: only touch `version` inside the [package] table.
+          const cf = "src-tauri/Cargo.toml";
+          const lines = fs.readFileSync(cf, "utf8").split(/\r?\n/);
+          let inPackage = false, done = false;
+          for (let i = 0; i < lines.length; i++) {
+            const t = lines[i].trim();
+            if (/^\[.*\]$/.test(t)) inPackage = t === "[package]";
+            else if (inPackage && !done && /^version\s*=/.test(t)) {
+              lines[i] = `version = "${v}"`;
+              done = true;
+            }
+          }
+          if (!done) { console.error("No version found in [package] of Cargo.toml"); process.exit(1); }
+          fs.writeFileSync(cf, lines.join("\n"));
+          console.log("Version set to " + v);
+          '@ | Set-Content -Path "$env:RUNNER_TEMP/set-version.cjs" -Encoding utf8
+          node "$env:RUNNER_TEMP/set-version.cjs"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate release notes
+        id: notes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # GitHub picks the previous tag automatically; with no previous tag it
+          # lists everything up to this tag.
+          $body = gh api "repos/${{ github.repository }}/releases/generate-notes" `
+            -f tag_name="${{ github.ref_name }}" --jq .body
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($body)) {
+            Write-Warning "Could not generate notes; using a fallback."
+            $body = "Release ${{ github.ref_name }}"
+          }
+          $delim = "NOTES_EOF_$([guid]::NewGuid().ToString('N'))"
+          "body<<$delim" >> $env:GITHUB_OUTPUT
+          $body >> $env:GITHUB_OUTPUT
+          $delim >> $env:GITHUB_OUTPUT
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Spawner ${{ github.ref_name }}
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: false
+          prerelease: false
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
