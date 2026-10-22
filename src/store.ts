@@ -331,12 +331,21 @@ async function restartInstances(pairs: { projectId: string; appId: string }[]) {
   await startInstances(pairs);
 }
 
-/** The backend rescans after a change and pushes the new groups, so only the list is set here. */
-async function changeRoots(change: () => Promise<Root[]>) {
-  set({ loading: true });
+const rootKey = (path: string) => path.replace(/[\\/]+$/, "").replace(/\\/g, "/").toLowerCase();
+
+/**
+ * The backend rescans after a change and pushes the new groups, so only the list is set here. A folder being added
+ * shows in the list right away, since the scan is the slow part; the backend's list replaces it, or it is taken back
+ * if the backend refuses.
+ */
+async function changeRoots(change: () => Promise<Root[]>, adding?: Root) {
+  const previous = snapshot.roots;
+  const optimistic = adding && !previous.some((r) => rootKey(r.path) === rootKey(adding.path));
+  set({ loading: true, ...(optimistic ? { roots: [...previous, adding] } : {}) });
   try {
     set({ roots: await change(), error: null });
   } catch (e) {
+    if (optimistic) set({ roots: previous });
     fail(e);
   } finally {
     set({ loading: false });
@@ -604,7 +613,7 @@ export const actions = {
       fail(e);
     }
   },
-  addRoot: (path: string, label?: string) => changeRoots(() => api.addRoot(path, label)),
+  addRoot: (path: string, label?: string) => changeRoots(() => api.addRoot(path, label), { path, label }),
   removeRoot: (path: string) => changeRoots(() => api.removeRoot(path)),
   openPort: (port: number) => api.openPort(port).catch(fail),
   async setNotifyScripts(notifyScripts: boolean) {

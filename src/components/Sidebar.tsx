@@ -453,7 +453,7 @@ function Scripts({
   );
 }
 
-/** Placeholder rows for the first scan, so the tree reads as being filled in rather than empty. */
+/** Placeholder rows for the first scan and while a folder is added or removed, so the tree reads as being filled in rather than empty. */
 function ScanningRows() {
   return (
     <div className="scanning" role="status" aria-live="polite">
@@ -716,7 +716,7 @@ export function Sidebar({ snap, theme, onSolo, onTheme, onGuide, onLogoClick, on
           {worktrees.map((g) => (
             <GroupBlock key={g.id} group={g} snap={snap} onSolo={onSolo} expand={keep !== null} />
           ))}
-          {!snap.scanned && snap.roots.length > 0 && <ScanningRows />}
+          {(snap.loading || (!snap.scanned && snap.roots.length > 0)) && <ScanningRows />}
           {groups.length === 0 && snap.groups.length > 0 && (keep || text) && <p className="empty">No apps match.</p>}
           {snap.scanned && !snap.loading && snap.roots.length > 0 && (
             <Scripts groups={scripts} snap={snap} onSolo={onSolo} onToast={onToast} filtering={keep !== null || text !== ""} />
