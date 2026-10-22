@@ -88,17 +88,14 @@ jobs:
       - name: Generate release notes
         id: notes
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # GitHub picks the previous tag automatically; with no previous tag it
-          # lists everything up to this tag.
-          $body = gh api "repos/${{ github.repository }}/releases/generate-notes" `
-            -f tag_name="${{ github.ref_name }}" --jq .body
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($body)) {
-            Write-Warning "Could not generate notes; using a fallback."
-            $body = "Release ${{ github.ref_name }}"
-          }
+          # One bullet per commit since the previous tag (GitHub's generated notes list only PRs).
+          $tag = "${{ github.ref_name }}"
+          $prev = git describe --tags --abbrev=0 "$tag^" 2>$null
+          $range = if ($LASTEXITCODE -eq 0 -and $prev) { "$prev..$tag" } else { $tag }
+          $commits = git log --no-merges --format="* %s" $range | Where-Object { $_ -notmatch 'Co-Authored-By' }
+          $body = if ($commits) { ($commits -join "`n") } else { "* Maintenance release" }
+          if ($prev) { $body += "`n`n**Full Changelog**: https://github.com/${{ github.repository }}/compare/$prev...$tag" }
           $delim = "NOTES_EOF_$([guid]::NewGuid().ToString('N'))"
           "body<<$delim" >> $env:GITHUB_OUTPUT
           $body >> $env:GITHUB_OUTPUT
