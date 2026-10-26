@@ -1,7 +1,8 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { isActive, type LogLine } from "../api";
 import { buildRows, clock, colorVar, highlightRegex, isOwnFrame, matcherFor, squashRows, type Level, type Row, type Run } from "../logModel";
 import { actions, indexInstances, type InstanceInfo, type Snapshot } from "../store";
+import { useRowSelection } from "../useRowSelection";
 import { useContextMenu } from "./ContextMenu";
 import { IconButton } from "./IconButton";
 
@@ -21,6 +22,8 @@ interface Props {
   onFocus: (id: string) => void;
   onToast: (text: string) => void;
   onToggleSide: () => void;
+  /** A view handed over by the companion: its level, search text and the line it was scrolled to. */
+  restore: { level: LevelFilter; query: string; anchor: number | null; nonce: number } | null;
 }
 
 const TOK = /\b(GET|POST|PUT|DELETE|PATCH)\b|→ (\d{3})|\((\d+ms)\)|\b(\w+)=([\w.\-]+)|"([^"]+)"/g;
@@ -199,7 +202,7 @@ function Seg({ value, onChange }: { value: LevelFilter; onChange: (v: LevelFilte
   );
 }
 
-export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, onFocus, onToast, onToggleSide }: Props) {
+export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, onFocus, onToast, onToggleSide, restore }: Props) {
   const instances = useMemo(() => indexInstances(snap.groups), [snap.groups]);
   const [query, setQuery] = useState("");
   const [level, setLevel] = useState<LevelFilter>("all");
@@ -208,7 +211,6 @@ export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, on
   const [fw, setFw] = useState(false);
   const [squash, setSquash] = useState(true);
   const [openRuns, setOpenRuns] = useState<Set<number>>(new Set());
-  const [sel, setSel] = useState<Set<number>>(new Set());
   const [pending, setPending] = useState(0);
   const [menu, setMenu] = useState<{ top: number; right: number } | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -305,90 +307,41 @@ export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, on
     return marks.slice(-MAX_TICKS);
   }, [visible]);
 
-  const selRef = useRef(sel);
-  selRef.current = sel;
-  const visibleRef = useRef(visible);
-  visibleRef.current = visible;
-  const dragged = useRef(false);
-
-  const pick = useCallback((line: LogLine) => {
-    if (dragged.current || !window.getSelection()?.isCollapsed) return;
-    setSel((cur) => {
-      const next = new Set(cur);
-      if (!next.delete(line.seq)) next.add(line.seq);
-      return next;
-    });
-  }, []);
-
-  // Holding the left button and moving across rows selects every row in between.
-  // Staying inside the starting row leaves the native text selection alone.
-  const onLogMouseDown = (e: ReactMouseEvent<HTMLDivElement>) => {
-    const host = e.currentTarget;
-    const target = e.target as HTMLElement;
-    const startRow = target.closest<HTMLElement>(".row");
-    if (e.button !== 0 || !startRow || target.closest("button, .trace")) return;
-    const seqs = visibleRef.current.map((r) => r.line.seq);
-    const index = new Map(seqs.map((s, i) => [s, i]));
-    const from = index.get(Number(startRow.dataset.seq));
-    if (from === undefined) return;
-    const base = selRef.current;
-    let y = e.clientY;
-    let moved = false;
-
-    const rowIndexAtPointer = () => {
-      const box = host.getBoundingClientRect();
-      const el = document.elementFromPoint(box.left + 40, Math.min(Math.max(y, box.top + 1), box.bottom - 1));
-      const row = el?.closest<HTMLElement>(".row");
-      return (row && index.get(Number(row.dataset.seq))) ?? -1;
-    };
-    const update = () => {
-      const to = rowIndexAtPointer();
-      if (to < 0 || (!moved && to === from)) return;
-      if (!moved) {
-        moved = true;
-        dragged.current = true;
-        host.classList.add("dragging");
-        window.getSelection()?.removeAllRanges();
-      }
-      setSel(new Set([...base, ...seqs.slice(Math.min(from, to), Math.max(from, to) + 1)]));
-    };
-    const block = (ev: Event) => moved && ev.preventDefault();
-    const move = (ev: globalThis.MouseEvent) => {
-      if (ev.buttons === 0) return stop();
-      y = ev.clientY;
-      update();
-    };
-    const autoscroll = window.setInterval(() => {
-      if (!moved) return;
-      const box = host.getBoundingClientRect();
-      const d = y < box.top + 24 ? y - (box.top + 24) : y > box.bottom - 24 ? y - (box.bottom - 24) : 0;
-      if (!d) return;
-      host.scrollTop += Math.max(-30, Math.min(30, d / 2));
-      update();
-    }, 30);
-    function stop() {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", stop);
-      document.removeEventListener("selectstart", block);
-      window.clearInterval(autoscroll);
-      host.classList.remove("dragging");
-      // the click that follows mouseup must not toggle the row we ended on
-      if (moved) window.setTimeout(() => (dragged.current = false), 0);
-    }
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", stop);
-    document.addEventListener("selectstart", block);
-  };
+  const { sel, setSel, pick, clear: clearSel, onMouseDown: onLogMouseDown } = useRowSelection(useMemo(() => visible.map((r) => r.line.seq), [visible]));
+  const pickLine = useCallback((line: LogLine) => pick(line.seq), [pick]);
 
   const jumpTo = (seq: number) => {
     const el = scroller.current;
     const row = el?.querySelector<HTMLElement>(`[data-seq="${seq}"]`);
-    if (!el || !row) return;
+    if (!el) return;
+    if (!row) {
+      // The line may sit inside a collapsed run of similar lines: open that run and look again.
+      const head = runs.find((r) => r.rows.some((x) => x.line.seq === seq))?.rows[0].line.seq;
+      if (head !== undefined && !openRuns.has(head)) {
+        toggleRun(head);
+        window.setTimeout(() => jumpTo(seq), 60);
+      }
+      return;
+    }
     onFollow(false);
     el.classList.add("smooth");
     el.scrollTop = row.offsetTop - 80;
     window.setTimeout(() => el.classList.remove("smooth"), 700);
   };
+
+  const jumpRef = useRef(jumpTo);
+  jumpRef.current = jumpTo;
+  useEffect(() => {
+    if (!restore) return;
+    setLevel(restore.level);
+    setQuery(restore.query);
+    setSel(new Set());
+    const anchor = restore.anchor;
+    if (anchor === null) return;
+    // The filtered rows render on the next frame, so look for the line after that.
+    const t = window.setTimeout(() => jumpRef.current(anchor), 80);
+    return () => window.clearTimeout(t);
+  }, [restore]);
 
   const copySelected = async () => {
     const text = rows
@@ -398,7 +351,7 @@ export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, on
       .join("\n");
     await navigator.clipboard.writeText(text);
     onToast(`${sel.size} line${sel.size === 1 ? "" : "s"} copied`);
-    setSel(new Set());
+    clearSel();
   };
 
   const toggleSource = (id: string) => {
@@ -411,7 +364,7 @@ export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, on
     const onKey = (e: KeyboardEvent) => {
       const typing = (e.target as HTMLElement).tagName === "INPUT";
       if (e.key === "/" && !typing) (e.preventDefault(), searchRef.current?.focus());
-      else if (e.key === "Escape") setSel(new Set());
+      else if (e.key === "Escape") clearSel();
       else if (e.key === "End" && !typing) onFollow(true);
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "l") (e.preventDefault(), void actions.clearLogs());
     };
@@ -614,7 +567,7 @@ export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, on
               ...(hit
                 ? [
                     { label: "Copy line", icon: "ph ph-copy-simple", run: () => ctx.copy(hit.line.text, "Line") },
-                    { label: sel.has(seq) ? "Deselect line" : "Select line", icon: "ph ph-check-square", run: () => pick(hit.line) },
+                    { label: sel.has(seq) ? "Deselect line" : "Select line", icon: "ph ph-check-square", run: () => pick(hit.line.seq) },
                     "sep" as const,
                   ]
                 : []),
@@ -648,7 +601,7 @@ export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, on
                 showTime={showTime}
                 fw={fw}
                 re={re}
-                onPick={pick}
+                onPick={pickLine}
                 onToggleRun={toggleRun}
               />
             );
@@ -705,7 +658,7 @@ export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, on
               <i className="ph ph-copy" />
               Copy
             </button>
-            <IconButton icon="ph ph-x" label="Clear selection" kbd="Esc" onClick={() => setSel(new Set())} />
+            <IconButton icon="ph ph-x" label="Clear selection" kbd="Esc" onClick={clearSel} />
           </div>
         </div>
       </div>

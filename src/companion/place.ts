@@ -42,9 +42,9 @@ export async function place(anchor: Anchor, width: number, height: number) {
   const monitor = await monitorOf(anchor);
   if (!monitor) return;
   const scale = monitor.scaleFactor;
-  const w = Math.ceil(width * scale);
-  const h = Math.ceil(height * scale);
   const { position: at, size } = monitor.workArea;
+  const w = Math.ceil(width * scale);
+  const h = Math.min(Math.ceil(height * scale), size.height);
   const x = anchor.side === "right" ? at.x + size.width - w : at.x;
   const y = clamp(at.y + Math.round(anchor.bottom * size.height) - h, at.y, at.y + size.height - h);
   await api.companionPlace(x, y, w, h);

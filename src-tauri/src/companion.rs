@@ -200,6 +200,97 @@ fn drag(window: &WebviewWindow) {
     let _ = window.start_dragging();
 }
 
+/// Where the cursor is inside the companion, in physical pixels from its top left corner, or none when it is outside
+/// the window or another window covers it. The page cannot tell this reliably itself: clicking in the panel moves
+/// keyboard focus to it, and the webview then reports that the mouse left.
+#[tauri::command]
+pub fn companion_pointer(app: AppHandle) -> Option<(i32, i32)> {
+    let window = app.get_webview_window(LABEL)?;
+    pointer(&window)
+}
+
+#[cfg(windows)]
+fn pointer(window: &WebviewWindow) -> Option<(i32, i32)> {
+    use windows_sys::Win32::Foundation::{POINT, RECT};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GA_ROOT, GetAncestor, GetCursorPos, GetWindowRect, WindowFromPoint};
+    let hwnd = window.hwnd().ok()?.0;
+    unsafe {
+        let mut at = POINT { x: 0, y: 0 };
+        if GetCursorPos(&mut at) == 0 {
+            return None;
+        }
+        let hit = WindowFromPoint(at);
+        if hit.is_null() || GetAncestor(hit, GA_ROOT) != hwnd {
+            return None;
+        }
+        let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        if GetWindowRect(hwnd, &mut rect) == 0 {
+            return None;
+        }
+        Some((at.x - rect.left, at.y - rect.top))
+    }
+}
+
+#[cfg(not(windows))]
+fn pointer(window: &WebviewWindow) -> Option<(i32, i32)> {
+    let cursor = window.cursor_position().ok()?;
+    let at = window.outer_position().ok()?;
+    let size = window.outer_size().ok()?;
+    let (x, y) = ((cursor.x - at.x as f64) as i32, (cursor.y - at.y as f64) as i32);
+    (x >= 0 && y >= 0 && x < size.width as i32 && y < size.height as i32).then_some((x, y))
+}
+
+/// The window that had focus before the companion was made focusable, so it can get it back.
+#[cfg(windows)]
+static PREVIOUS: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+/// The companion never takes focus on its own, so the window the user is typing in keeps it. While the user is working
+/// in the panel (typing a filter, selecting text, pressing Esc) the page asks for focus; when they are done it gives it
+/// back to the window that had it.
+#[tauri::command]
+pub fn companion_focus(app: AppHandle, focus: bool) {
+    let Some(window) = app.get_webview_window(LABEL) else { return };
+    set_focus(&window, focus);
+}
+
+#[cfg(windows)]
+fn set_focus(window: &WebviewWindow, focus: bool) {
+    use std::sync::atomic::Ordering;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, GetForegroundWindow, GetWindowLongPtrW, IsWindow, SetForegroundWindow, SetWindowLongPtrW, WS_EX_NOACTIVATE,
+    };
+    let Ok(hwnd) = window.hwnd() else { return };
+    let ours = hwnd.0 as isize;
+    // The style is flipped here and not through `set_focusable`: that makes the window layer re-apply the visibility it
+    // remembers, and this window is shown and hidden with raw Win32 calls it knows nothing about, so it would be hidden.
+    let style = unsafe { GetWindowLongPtrW(hwnd.0, GWL_EXSTYLE) };
+    if focus {
+        let front = unsafe { GetForegroundWindow() } as isize;
+        if front != ours && front != 0 {
+            PREVIOUS.store(front, Ordering::Relaxed);
+        }
+        unsafe {
+            SetWindowLongPtrW(hwnd.0, GWL_EXSTYLE, style & !(WS_EX_NOACTIVATE as isize));
+            SetForegroundWindow(hwnd.0);
+        }
+    } else {
+        unsafe { SetWindowLongPtrW(hwnd.0, GWL_EXSTYLE, style | WS_EX_NOACTIVATE as isize) };
+        let previous = PREVIOUS.swap(0, Ordering::Relaxed);
+        // Only hand focus back when it is still ours; the user may have clicked somewhere else already.
+        if previous != 0 && unsafe { GetForegroundWindow() } as isize == ours && unsafe { IsWindow(previous as _) } != 0 {
+            unsafe { SetForegroundWindow(previous as _) };
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn set_focus(window: &WebviewWindow, focus: bool) {
+    let _ = window.set_focusable(focus);
+    if focus {
+        let _ = window.set_focus();
+    }
+}
+
 /// A tool window is left out of Alt+Tab, which `skip_taskbar` alone does not do.
 #[cfg(windows)]
 fn hide_from_alt_tab(window: &WebviewWindow) {

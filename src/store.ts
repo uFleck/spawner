@@ -641,6 +641,7 @@ export async function initStore() {
   await listen<LogLine>("log-line", (e) => enqueueLog(e.payload));
   await listen<Group[]>("groups-changed", (e) => set({ groups: e.payload, scanned: true }));
   await listen<Settings>("settings-changed", (e) => set({ settings: e.payload }));
+  await listen<string | null>("logs-cleared", (e) => set({ logs: e.payload ? snapshot.logs.filter((l) => l.instance !== e.payload) : [] }));
   void watchMcp();
   await loadUiState();
   set({ roots: await api.getRoots() });

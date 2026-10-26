@@ -163,13 +163,15 @@ fn groups(hub: State<'_, Arc<Hub>>) -> Vec<Group> {
     hub.groups()
 }
 
-/// Brings Spawner to the front, showing only `instance`'s log when one is given.
+/// Brings Spawner to the front. With an `instance` it shows only that app's log; without one it takes over the view
+/// the companion saved (apps, level, search and scroll position).
 #[tauri::command]
 fn companion_open(app: AppHandle, instance: Option<String>) {
     show_main_window(&app);
-    if let Some(id) = instance {
-        let _ = app.emit_to("main", "focus-instance", id);
-    }
+    let _ = match instance {
+        Some(id) => app.emit_to("main", "focus-instance", id),
+        None => app.emit_to("main", "restore-view", ()),
+    };
 }
 
 /// Stops showing an app that ended in an error, so the companion can go away once nothing else needs it.
@@ -238,9 +240,11 @@ fn logs_since(hub: State<'_, Arc<Hub>>, since: u64) -> Vec<LogLine> {
     hub.logs_since(since)
 }
 
+/// Every window keeps its own copy of the log, so they are told which part was cleared.
 #[tauri::command]
-fn clear_logs(hub: State<'_, Arc<Hub>>, instance_id: Option<String>) {
+fn clear_logs(app: AppHandle, hub: State<'_, Arc<Hub>>, instance_id: Option<String>) {
     hub.clear_logs(instance_id.as_deref());
+    let _ = app.emit("logs-cleared", instance_id);
 }
 
 /// Tells the user about a script's state change, unless they are looking at Spawner already.
@@ -403,6 +407,8 @@ pub fn run() {
             companion_dismiss,
             companion::companion_place,
             companion::companion_drag,
+            companion::companion_focus,
+            companion::companion_pointer,
             get_watched,
             set_watch,
             load_ui_state,

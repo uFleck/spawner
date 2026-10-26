@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConcludeDialog } from "./components/ConcludeDialog";
 import { RunDialog } from "./components/RunDialog";
+import { loadView } from "./companion/view";
 import { ContextMenuProvider, type MenuItem } from "./components/ContextMenu";
 import { LogPane } from "./components/LogPane";
 import { Palette } from "./components/Palette";
@@ -35,6 +36,7 @@ export default function App() {
   const [follow, setFollow] = useState(true);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<string | null>(null);
+  const [restore, setRestore] = useState<{ level: "all" | "wrn" | "err"; query: string; anchor: number | null; nonce: number } | null>(null);
   const [toast, setToast] = useState<{ text: string; on: boolean }>({ text: "", on: false });
   const toastTimer = useRef<number | undefined>(undefined);
 
@@ -90,6 +92,23 @@ export default function App() {
   soloRef.current = solo;
   useEffect(() => {
     const off = listen<string>("focus-instance", (e) => soloRef.current(e.payload));
+    return () => void off.then((fn) => fn());
+  }, []);
+
+  // The companion hands over what it was showing: the apps, the level and search text, and the line it was scrolled to.
+  const restoreView = useCallback(() => {
+    const view = loadView();
+    const known = new Set([...instances.keys(), ...snap.logs.map((l) => l.instance)]);
+    const shown = view.apps.filter((id) => known.has(id));
+    setHidden(shown.length ? new Set([...known].filter((id) => !shown.includes(id))) : new Set());
+    setSelected(shown.length === 1 ? shown[0] : null);
+    setFollow(view.follow);
+    setRestore({ level: view.level, query: view.query, anchor: view.follow ? null : view.anchor, nonce: Date.now() });
+  }, [instances, snap.logs]);
+  const restoreRef = useRef(restoreView);
+  restoreRef.current = restoreView;
+  useEffect(() => {
+    const off = listen("restore-view", () => restoreRef.current());
     return () => void off.then((fn) => fn());
   }, []);
 
@@ -163,6 +182,7 @@ export default function App() {
           onFocus={toggleFocus}
           onToast={showToast}
           onToggleSide={toggleSide}
+          restore={restore}
         />
         <StatusBar snap={snap} follow={follow} onGuide={() => setGuide(true)} />
       </div>

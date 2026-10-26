@@ -82,3 +82,44 @@
   --scroll: rgba(18, 21, 28, 0.14);
   --scroll-h: rgba(18, 21, 28, 0.3);
 }
+
+/* ───────── hidden skin: "Spawner" (easter egg, see spawnerTheme.ts) ─────────
+   Overrides dark and light via data-skin, so the data-theme switch underneath keeps working.
+   Stone panes, grass accent, square corners, hard 2px bevels, no blurred shadows. */
+:root[data-skin="spawner"] {
+  color-scheme: dark;
+  --font-pixel: "Silkscreen", "JetBrains Mono", Consolas, monospace;
+  --r: 0px;
+  --bg-page: #191919;
+  --bg-surface: #2b2b2b;
+  --bg-elevated: #383838;
+  --border-default: #0f0f0f;
+  --border-strong: #5a5a5a;
+  --text-primary: #ececec;
+  --text-secondary: #c0c0c0;
+  --text-tertiary: #a0a0a0;
+  --accent: #5fb83a;
+  --accent-hover: #7ad64f;
+  --accent-text: #86e05a;
+  --on-accent: #0c1a06;
+  --accent-soft: rgba(95, 184, 58, 0.2);
+  --hover-tint: rgba(255, 255, 255, 0.07);
+  --press-tint: rgba(0, 0, 0, 0.3);
+  --sel-bg: rgba(95, 184, 58, 0.22);
+  --sel-fg: #ffffff;
+  --ok: #7ad64f;
+  --warn: #f2b630;
+  --err: #ff6a58;
+  --i1: #6b9cff;
+  --i2: #7ad64f;
+  --i3: #ff9a45;
+  --i4: #c08cff;
+  --i5: #f2c230;
+  --shadow-pop: 4px 4px 0 rgba(0, 0, 0, 0.55);
+  --ring: 0 0 0 2px #ffffff;
+  --scroll: #4a4a4a;
+  --scroll-h: #6a6a6a;
+  --bv-l: #6e6e6e;
+  --bv-d: #101010;
+  image-rendering: pixelated;
+}

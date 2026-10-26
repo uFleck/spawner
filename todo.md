@@ -31,3 +31,16 @@ so it never steals focus; the page owns size and place (one SetWindowPos via `co
 - [x] TS: src/companion (feed, place, UI), main.tsx branch by window label, StatusBar toggle, focus-instance -> solo, tokens.css split
 - [x] verify: cargo check, cargo test, tsc
 - [ ] verify live: add C:\Projects\spawner to Spawner, run `tauri dev`; check no focus steal on show/click, hover tail, drag+snap, Alt+Tab, theme follow
+
+# Companion redesign: auto-hide panel, full logs, controls (Sonnet direct)
+Execution: Sonnet direct (window focus + IPC contract + shared view state; the CSS is adapted to the real markup, not copied). Mockups: design/companion.html.
+Decisions: layout A; no pause; right-click an app chip for restart/stop/show only/copy/clear/open; the error pill jumps to the failing line without touching filters;
+pinned + pointer away = last 3 lines under the same filter, hover expands; selection ported from the main log (shared hook); hidden while Spawner is focused;
+pixel look = the existing Minecraft skin (7 logo clicks / Konami), its tokens now live in tokens.css.
+- [x] feed.ts keeps the full log (20k) + failedAt + logs-cleared; view.ts shares the view through localStorage; control.ts restarts/stops via the backend
+- [x] useRowSelection hook shared by LogPane and the companion; LogPane takes a `restore` view (level, search, scroll line, apps via App.tsx)
+- [x] Rust: companion_open emits restore-view, companion_focus (focusable only while the user works in the panel, focus handed back), clear_logs emits logs-cleared
+- [x] Panel, Mascot, pill, tuck (window shifted past the edge), companion.css incl. the Minecraft skin; browser preview mocks for the window calls
+- [x] verify: tsc, vite build, cargo check/test, browser preview (compact/open, menu, selection, pill jump, skin, restore-view)
+- [ ] verify live in `tauri dev`: panel focus (type a filter, Esc, Ctrl+C, copy button) and focus handed back; tuck + hover; drag + snap; left edge; Open Spawner restores view; logs-cleared sync
+- [x] fix (live feedback): the pointer is read from the backend (`companion_pointer`), not from the webview's mouse events, which fire a false "mouse left" when a click moves keyboard focus; only the mascot and the panel count as hover (the error pill no longer opens the panel); unpinned hide 700 -> 250 ms; tuck slides the mascot inside the window (spring out, wake hop) instead of moving the window; chips + toolbar fold as one grid row

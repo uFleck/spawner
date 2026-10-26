@@ -401,12 +401,18 @@ export function installMock() {
     set_watch: (a) => (a.on ? watched.add(`${a.repo}::${a.appId}`) : watched.delete(`${a.repo}::${a.appId}`), [...watched]),
     get_settings: () => settings,
     companion_open: () => undefined,
+    companion_focus: () => undefined,
+    // undefined means the backend cannot say where the cursor is, so the page follows its own pointer events.
+    companion_pointer: () => undefined,
+    companion_place: () => undefined,
+    companion_drag: () => undefined,
     companion_dismiss: () => undefined,
     set_settings: (a) => void (settings = a.settings as typeof settings),
   };
 
   const w = window as unknown as Record<string, unknown>;
   w.__TAURI_INTERNALS__ = {
+    metadata: { currentWindow: { label: "companion" }, currentWebview: { label: "companion", windowLabel: "companion" } },
     transformCallback: (fn: Handler) => {
       const id = cb++;
       callbacks.set(id, fn);
@@ -421,6 +427,9 @@ export function installMock() {
         return cb++;
       }
       if (cmd.startsWith("plugin:event|")) return undefined;
+      // The companion places itself against a monitor; the preview has none, so it stays where the page puts it.
+      if (cmd === "plugin:window|available_monitors") return [];
+      if (cmd.startsWith("plugin:window|")) return null;
       if (cmd === "plugin:dialog|open") return SAMPLE_FOLDERS[nextFolder++ % SAMPLE_FOLDERS.length];
       const fn = commands[cmd];
       if (!fn) throw new Error(`mock: unknown command ${cmd}`);
@@ -428,6 +437,8 @@ export function installMock() {
     },
   };
   w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => undefined };
+  // Lets a browser test play a backend event, such as the companion asking for its view to be restored.
+  w.__mockEmit = emit;
 }
 
 /** For the companion preview (`?companion`): starts a few services so it has something to show. */
