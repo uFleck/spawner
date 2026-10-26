@@ -5,7 +5,7 @@ import { inTauri } from "./components/WindowControls";
 
 const RELEASES_URL = "https://api.github.com/repos/uFleck/spawner/releases?per_page=20";
 const FIRST_CHECK_MS = 10_000;
-const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
+const CHECK_EVERY_MS = 30 * 60 * 1000;
 
 export interface ReleaseNote {
   version: string;
@@ -135,7 +135,7 @@ export async function restart() {
 
 let started = false;
 
-/** Checks shortly after launch, then every few hours. Only in a packaged app, never in dev or a browser. */
+/** Checks shortly after launch, then every half hour. Only in a packaged app, never in dev or a browser. */
 export function startUpdateChecks() {
   if (started || !inTauri || !import.meta.env.PROD) return;
   started = true;
