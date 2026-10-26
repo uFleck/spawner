@@ -4,7 +4,7 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { inTauri } from "./components/WindowControls";
 
 const RELEASES_URL = "https://api.github.com/repos/uFleck/spawner/releases?per_page=20";
-const FIRST_CHECK_MS = 10_000;
+const FIRST_CHECK_MS = 2_000;
 const CHECK_EVERY_MS = 30 * 60 * 1000;
 
 export interface ReleaseNote {
