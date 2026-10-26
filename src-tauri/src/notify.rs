@@ -10,11 +10,19 @@ use std::sync::Mutex;
 
 pub const FILE_NAME: &str = "settings.json";
 
-#[derive(Serialize, Deserialize, Clone, Copy, Default, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     /// Tell the user when a script starts and when it ends, while the Spawner window is not focused.
     pub notify_scripts: bool,
+    /// Show the companion window at the edge of the screen while apps run.
+    pub companion: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self { notify_scripts: false, companion: true }
+    }
 }
 
 pub struct Notifier {
@@ -72,7 +80,7 @@ mod tests {
     fn notifier(on: bool) -> (TempDir, Notifier) {
         let dir = TempDir::new("notify");
         let n = Notifier::load(dir.path().join(FILE_NAME));
-        n.save(Settings { notify_scripts: on }).unwrap();
+        n.save(Settings { notify_scripts: on, ..Settings::default() }).unwrap();
         (dir, n)
     }
 
@@ -101,7 +109,7 @@ mod tests {
     fn off_says_nothing_but_keeps_track_so_turning_it_on_mid_run_still_reports_the_end() {
         let (_dir, n) = notifier(false);
         assert_eq!(n.note("a", "x", &InstanceState::Building), None);
-        n.save(Settings { notify_scripts: true }).unwrap();
+        n.save(Settings { notify_scripts: true, ..Settings::default() }).unwrap();
         assert!(n.note("a", "x", &InstanceState::Exited { code: Some(0) }).is_some());
     }
 

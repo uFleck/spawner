@@ -1,3 +1,4 @@
+import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConcludeDialog } from "./components/ConcludeDialog";
 import { RunDialog } from "./components/RunDialog";
@@ -83,6 +84,14 @@ export default function App() {
     },
     [instances, snap.logs, showToast],
   );
+
+  // The companion asks for one app's log when it is clicked.
+  const soloRef = useRef(solo);
+  soloRef.current = solo;
+  useEffect(() => {
+    const off = listen<string>("focus-instance", (e) => soloRef.current(e.payload));
+    return () => void off.then((fn) => fn());
+  }, []);
 
   /** Focuses one app's log, or shows every log again when it is already the only one shown. */
   const toggleFocus = useCallback(

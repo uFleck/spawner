@@ -22,3 +22,12 @@ Execution: Sonnet direct (Rust<->TS contract change, open design). Reason per us
 - [x] verify: cargo test, tsc, vite build, real scan against C:\umbler, browser run
 - [x] interrogate: skip: design not contested
 - [x] PR: skip: repo has no commits, nothing asked
+
+# Companion: floating log window at the screen edge (Sonnet direct)
+Execution: Sonnet direct (new window + Win32 focus/placement + IPC contract; no cheap check covers the window behavior).
+Decisions: Rust owns visibility (setting on, main not focused, something active or an undismissed error), shown with SW_SHOWNOACTIVATE
+so it never steals focus; the page owns size and place (one SetWindowPos via `companion_place`); drag the robot to move, snaps to the nearer side.
+- [x] Rust: companion.rs, `groups`/`companion_open`/`companion_dismiss`/`companion_place`, `companion` setting (default on), settings-changed event
+- [x] TS: src/companion (feed, place, UI), main.tsx branch by window label, StatusBar toggle, focus-instance -> solo, tokens.css split
+- [x] verify: cargo check, cargo test, tsc
+- [ ] verify live: add C:\Projects\spawner to Spawner, run `tauri dev`; check no focus steal on show/click, hover tail, drag+snap, Alt+Tab, theme follow

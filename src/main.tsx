@@ -10,15 +10,21 @@ import "@fontsource/silkscreen/400.css";
 import "@phosphor-icons/web/regular/style.css";
 import "@phosphor-icons/web/bold/style.css";
 import "@phosphor-icons/web/fill/style.css";
-import App from "./App";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
+/** The companion window loads the same page. In a plain browser, `?companion` previews it against the mock backend. */
 async function boot() {
-  if (import.meta.env.DEV && !("__TAURI_INTERNALS__" in window)) {
-    (await import("./dev/mockBackend")).installMock();
+  const inTauri = "__TAURI_INTERNALS__" in window;
+  const companion = inTauri ? getCurrentWindow().label === "companion" : new URLSearchParams(location.search).has("companion");
+  if (import.meta.env.DEV && !inTauri) {
+    const mock = await import("./dev/mockBackend");
+    mock.installMock();
+    if (companion) await mock.startSome();
   }
+  const Root = companion ? (await import("./companion/Companion")).Companion : (await import("./App")).default;
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
-      <App />
+      <Root />
     </React.StrictMode>,
   );
 }

@@ -1,7 +1,7 @@
 /* Dev-only stand-in for the Tauri backend, so the UI can be driven in a plain browser (`pnpm dev`).
    Groups mirror a real scan of C:/dev; run/stop/log output is simulated.
    Folders can be added and removed in memory (`?empty` starts with none); an added folder shows as one project. */
-import { rootName, type AppDef, type AppMode, type Group, type InstanceState, type Level, type LogLine, type Param, type PortEvent, type Root, type StateEvent } from "../api";
+import { api, rootName, type AppDef, type AppMode, type Group, type InstanceState, type Level, type LogLine, type Param, type PortEvent, type Root, type StateEvent } from "../api";
 
 type Handler = (e: { event: string; id: number; payload: unknown }) => void;
 
@@ -133,7 +133,7 @@ const DEV_GROUPS: Group[] = [
 const DEV = "C:/dev";
 /** `?noscripts` starts without any script, to show the empty state. */
 const EMPTY_SCRIPTS = new URLSearchParams(location.search).has("noscripts");
-let settings = { notifyScripts: false };
+let settings = { notifyScripts: false, companion: true };
 const watched = new Set<string>();
 const SAMPLE_FOLDERS = ["D:/side/notes-api", "C:/scripts/nightly", "C:/work/clients"];
 
@@ -330,6 +330,7 @@ export function installMock() {
 
   const commands: Record<string, (a: Record<string, unknown>) => unknown> = {
     scan: () => groupsFor(roots),
+    groups: () => groupsFor(roots),
     get_roots: () => roots,
     add_root: async (a) => {
       const path = normalize(String(a.path ?? ""));
@@ -399,6 +400,8 @@ export function installMock() {
     get_watched: () => [...watched],
     set_watch: (a) => (a.on ? watched.add(`${a.repo}::${a.appId}`) : watched.delete(`${a.repo}::${a.appId}`), [...watched]),
     get_settings: () => settings,
+    companion_open: () => undefined,
+    companion_dismiss: () => undefined,
     set_settings: (a) => void (settings = a.settings as typeof settings),
   };
 
@@ -425,4 +428,11 @@ export function installMock() {
     },
   };
   w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => undefined };
+}
+
+/** For the companion preview (`?companion`): starts a few services so it has something to show. */
+export async function startSome() {
+  const groups = await api.scan();
+  const services = groups.flatMap((g) => g.projects.flatMap((p) => p.apps.filter((a) => a.mode === "service").map((a) => [p.id, a.id] as const)));
+  for (const [projectId, appId] of services.slice(0, 4)) await api.start(projectId, appId);
 }

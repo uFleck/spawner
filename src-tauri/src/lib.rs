@@ -1,4 +1,5 @@
 mod agent;
+mod companion;
 mod detect;
 mod discovery;
 mod job;
@@ -13,6 +14,7 @@ mod worktree;
 #[cfg(test)]
 mod testutil;
 
+use companion::Companion;
 use model::{Group, InstanceState, LogLine, Root};
 use notify::{Notifier, Settings};
 use runner::{Hub, HubEvent};
@@ -146,9 +148,34 @@ fn get_settings(notifier: State<'_, Arc<Notifier>>) -> Settings {
     notifier.settings()
 }
 
+/// Every window keeps its own copy of the settings, so a change is sent to all of them.
 #[tauri::command]
-fn set_settings(notifier: State<'_, Arc<Notifier>>, settings: Settings) -> Result<(), String> {
-    notifier.save(settings)
+fn set_settings(app: AppHandle, notifier: State<'_, Arc<Notifier>>, companion: State<'_, Arc<Companion>>, settings: Settings) -> Result<(), String> {
+    notifier.save(settings)?;
+    companion.set_enabled(&app, settings.companion);
+    let _ = app.emit("settings-changed", settings);
+    Ok(())
+}
+
+/// The last scan, without scanning again: the companion only needs the app names.
+#[tauri::command]
+fn groups(hub: State<'_, Arc<Hub>>) -> Vec<Group> {
+    hub.groups()
+}
+
+/// Brings Spawner to the front, showing only `instance`'s log when one is given.
+#[tauri::command]
+fn companion_open(app: AppHandle, instance: Option<String>) {
+    show_main_window(&app);
+    if let Some(id) = instance {
+        let _ = app.emit_to("main", "focus-instance", id);
+    }
+}
+
+/// Stops showing an app that ended in an error, so the companion can go away once nothing else needs it.
+#[tauri::command]
+fn companion_dismiss(app: AppHandle, companion: State<'_, Arc<Companion>>, instance: String) {
+    companion.dismiss(&app, &instance);
 }
 
 #[tauri::command]
@@ -291,9 +318,20 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![AUTOSTART_ARG])))
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                WindowEvent::Focused(focused) => {
+                    if let Some(companion) = window.try_state::<Arc<Companion>>() {
+                        companion.set_main_focused(window.app_handle(), *focused);
+                    }
+                }
+                _ => {}
             }
         })
         .plugin(tauri_plugin_process::init())
@@ -311,10 +349,13 @@ pub fn run() {
             let roots_file = data_file(app.handle(), roots::FILE_NAME)?;
             let notifier = Arc::new(Notifier::load(data_file(app.handle(), notify::FILE_NAME)?));
             app.manage(notifier.clone());
+            let companion = Arc::new(Companion::new(notifier.settings().companion));
+            app.manage(companion.clone());
             let hub = Hub::new(roots::load(&roots_file, env_roots().as_deref()), move |event| {
                 let _ = match event {
                     HubEvent::State(s) => {
                         notify_script(&handle, &notifier, &s);
+                        companion.on_state(&handle, &s);
                         handle.emit("instance-state", s)
                     }
                     HubEvent::Log(l) => handle.emit("log-line", l),
@@ -357,6 +398,11 @@ pub fn run() {
             mcp_info,
             get_settings,
             set_settings,
+            groups,
+            companion_open,
+            companion_dismiss,
+            companion::companion_place,
+            companion::companion_drag,
             get_watched,
             set_watch,
             load_ui_state,

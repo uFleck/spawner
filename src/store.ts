@@ -129,7 +129,7 @@ let snapshot: Snapshot = {
   entered: {},
   logs: [],
   mcp: null,
-  settings: { notifyScripts: false },
+  settings: { notifyScripts: false, companion: true },
   loading: true,
   scanned: false,
   error: null,
@@ -616,18 +616,21 @@ export const actions = {
   addRoot: (path: string, label?: string) => changeRoots(() => api.addRoot(path, label), { path, label }),
   removeRoot: (path: string) => changeRoots(() => api.removeRoot(path)),
   openPort: (port: number) => api.openPort(port).catch(fail),
-  async setNotifyScripts(notifyScripts: boolean) {
-    const previous = snapshot.settings;
-    set({ settings: { ...previous, notifyScripts } });
-    try {
-      await api.setSettings({ ...previous, notifyScripts });
-    } catch (e) {
-      set({ settings: previous });
-      fail(e);
-    }
-  },
+  setNotifyScripts: (notifyScripts: boolean) => saveSettings({ notifyScripts }),
+  setCompanion: (companion: boolean) => saveSettings({ companion }),
   dismissError: () => set({ error: null, portConflict: null }),
 };
+
+async function saveSettings(patch: Partial<Settings>) {
+  const previous = snapshot.settings;
+  set({ settings: { ...previous, ...patch } });
+  try {
+    await api.setSettings({ ...previous, ...patch });
+  } catch (e) {
+    set({ settings: previous });
+    fail(e);
+  }
+}
 
 let initialized = false;
 export async function initStore() {
@@ -637,6 +640,7 @@ export async function initStore() {
   await listen<PortEvent>("instance-port", (e) => onPort(e.payload));
   await listen<LogLine>("log-line", (e) => enqueueLog(e.payload));
   await listen<Group[]>("groups-changed", (e) => set({ groups: e.payload, scanned: true }));
+  await listen<Settings>("settings-changed", (e) => set({ settings: e.payload }));
   void watchMcp();
   await loadUiState();
   set({ roots: await api.getRoots() });

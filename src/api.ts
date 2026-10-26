@@ -127,6 +127,8 @@ export type LinkStatus =
 export interface Settings {
   /** Tell the user when a script starts and ends while Spawner is not the focused window. */
   notifyScripts: boolean;
+  /** Show the companion window at the edge of the screen while apps run. */
+  companion: boolean;
 }
 
 export type Stream = "out" | "err" | "sys";
@@ -182,6 +184,8 @@ export const rootName = (root: Pick<Root, "path" | "label">) =>
 
 export const api = {
   scan: () => invoke<Group[]>("scan"),
+  /** The last scan's groups, without scanning again. */
+  groups: () => invoke<Group[]>("groups"),
   getRoots: () => invoke<Root[]>("get_roots"),
   addRoot: (path: string, label?: string) => invoke<Root[]>("add_root", { path, label: label ?? null }),
   removeRoot: (path: string) => invoke<Root[]>("remove_root", { path }),
@@ -211,5 +215,13 @@ export const api = {
   /** Takes effect the next time the app starts. Returns the new list. */
   setWatch: (repo: string, appId: string, on: boolean) => invoke<string[]>("set_watch", { repo, appId, on }),
   openPort: (port: number) => invoke<void>("open_port", { port }),
+  /** Brings the main window to the front, showing only this instance's log when one is given. */
+  companionOpen: (instanceId?: string) => invoke<void>("companion_open", { instance: instanceId ?? null }),
+  /** Moves and sizes the companion window in one step, in physical pixels. */
+  companionPlace: (x: number, y: number, width: number, height: number) => invoke<void>("companion_place", { x, y, width, height }),
+  /** Lets the user drag the companion window; resolves when they let go. */
+  companionDrag: () => invoke<void>("companion_drag"),
+  /** Stops showing an instance that ended in an error. */
+  companionDismiss: (instanceId: string) => invoke<void>("companion_dismiss", { instance: instanceId }),
   clearLogs: (instanceId?: string) => invoke<void>("clear_logs", { instanceId: instanceId ?? null }),
 };

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { countLevels } from "../logModel";
-import type { Snapshot } from "../store";
+import { actions, type Snapshot } from "../store";
 import { UpdateButton } from "./UpdateButton";
 
 export function StatusBar({ snap, follow, onGuide }: { snap: Snapshot; follow: boolean; onGuide: () => void }) {
@@ -32,6 +32,17 @@ export function StatusBar({ snap, follow, onGuide }: { snap: Snapshot; follow: b
       )}
       <span className="sp" />
       {import.meta.env.PROD && <UpdateButton snap={snap} />}
+      <button
+        type="button"
+        className={`mcp${snap.settings.companion ? " on" : ""}`}
+        data-tip={snap.settings.companion ? "The companion shows running apps' logs at the screen edge while Spawner is in the background. Click to turn off" : "Show running apps' logs at the screen edge while Spawner is in the background"}
+        data-side="top"
+        aria-pressed={snap.settings.companion}
+        onClick={() => void actions.setCompanion(!snap.settings.companion)}
+      >
+        <i className={snap.settings.companion ? "ph-fill ph-robot" : "ph ph-robot"} />
+        companion
+      </button>
       {mcp && (
         <button
           type="button"
