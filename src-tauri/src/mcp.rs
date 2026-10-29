@@ -3,6 +3,7 @@
 
 use crate::detect;
 use crate::model::{AppDef, AppMode, Group, InstanceState, Level, LogLine, Root, instance_id};
+use crate::presets::{self, MAIN, Member, Preset};
 use crate::runner::Hub;
 use axum::body::Bytes;
 use axum::extract::State;
@@ -31,6 +32,7 @@ const INSTRUCTIONS: &str = "Spawner runs and tracks the user's apps and scripts 
 Use these tools instead of running dev servers or builds in a terminal, so the user sees every process and log in the Spawner window. \
 Call hub_list_apps first. Select an app by `app` (plus `worktree` or `repo` when the name is ambiguous), by `path` (your working directory), or by `instance`. \
 hub_start waits until a service is running, or a task has finished, or it has failed, and returns the log lines from that run. Use hub_logs with `since_seq` to poll for new output. \
+The user also saves groups of apps as presets: hub_list_presets shows them, and hub_start_preset runs one in a worktree. \
 To run your own script (a Python tool, a PowerShell helper) here, it has to be declared in a spawner.json: call hub_script_guide first, and do not run such scripts in a terminal.";
 
 /// Ports to try, best first. The last port that worked comes before the default so a client config
@@ -220,6 +222,30 @@ fn tool_definitions() -> Value {
             "inputSchema": with_target(json!({}))
         },
         {
+            "name": "hub_list_presets",
+            "description": "List the presets the user saved in Spawner: a named set of apps (by repo and app) that start together. Each shows its default worktree, the worktrees it can run in (those holding at least one of its repos), and how its apps resolve in the default worktree, with instance id and state. In a worktree, an app whose repo the worktree lacks runs from the main checkout instead.",
+            "inputSchema": {"type": "object", "properties": {}}
+        },
+        {
+            "name": "hub_start_preset",
+            "description": "Start every app of a preset, concurrently, and return the log lines of each run. Each app runs from the worktree when it has that repo, else from the main checkout. Waits like hub_start (a service until it is running, a task until it has finished). An app that is already active is left as it is.",
+            "inputSchema": {"type": "object", "properties": {
+                "preset": {"type": "string", "description": "Preset name or id from hub_list_presets. Case-insensitive."},
+                "worktree": {"type": "string", "description": "Worktree id to run it in, such as \"PAYMENT-9986\" or \"main\". Default: the worktree the preset is set to."},
+                "wait": {"type": "boolean", "description": "Wait for each service to be running, or each task to finish. Default true."},
+                "timeout_seconds": {"type": "integer", "description": format!("How long to wait. Default {START_TIMEOUT}.")},
+                "log_lines": {"type": "integer", "description": "Log lines to return per app. Default 10."}
+            }, "required": ["preset"]}
+        },
+        {
+            "name": "hub_stop_preset",
+            "description": "Stop every active app of a preset, as resolved for the worktree, and wait until they have exited.",
+            "inputSchema": {"type": "object", "properties": {
+                "preset": {"type": "string", "description": "Preset name or id from hub_list_presets. Case-insensitive."},
+                "worktree": {"type": "string", "description": "Worktree id the preset runs in. Default: the worktree the preset is set to."}
+            }, "required": ["preset"]}
+        },
+        {
             "name": "hub_script_guide",
             "description": "How to make a script show up in Spawner: where to put its spawner.json, the format, and what a script that suits Spawner does. Call this before writing or running a script that hub_list_apps does not list, and when the user asks to wire up their scripts.",
             "inputSchema": {"type": "object", "properties": {}}
@@ -280,6 +306,15 @@ struct ListArgs {
 }
 
 #[derive(Deserialize, Default)]
+struct PresetArgs {
+    preset: Option<String>,
+    worktree: Option<String>,
+    wait: Option<bool>,
+    timeout_seconds: Option<u64>,
+    log_lines: Option<usize>,
+}
+
+#[derive(Deserialize, Default)]
 struct LogsArgs {
     #[serde(flatten)]
     target: Target,
@@ -295,6 +330,7 @@ struct LogsArgs {
 struct Hit {
     worktree: String,
     worktree_label: String,
+    main: bool,
     repo: String,
     project_id: String,
     project_path: String,
@@ -330,6 +366,7 @@ fn all_hits(groups: &[Group]) -> Vec<Hit> {
                 p.apps.iter().map(move |a| Hit {
                     worktree: g.id.clone(),
                     worktree_label: g.label.clone(),
+                    main: g.main,
                     repo: p.repo.clone(),
                     project_id: p.id.clone(),
                     project_path: p.path.clone(),
@@ -646,6 +683,143 @@ async fn stop_flow(hub: &Arc<Hub>, hit: &Hit) -> Out {
     }
 }
 
+struct Plan {
+    hits: Vec<Hit>,
+    missing: Vec<Member>,
+}
+
+/// The id of the task worktree named `wanted` (by id or label), if there is one. `main` is not a task worktree.
+fn task_worktree(groups: &[Group], wanted: &str) -> Option<String> {
+    groups.iter().filter(|g| !g.main).find(|g| g.id.eq_ignore_ascii_case(wanted) || g.label.eq_ignore_ascii_case(wanted)).map(|g| g.id.clone())
+}
+
+/// Each member runs from the `target` worktree when it has that repo, else from the main checkout, like the window does.
+fn plan_preset(groups: &[Group], preset: &Preset, target: &str) -> Plan {
+    let all = all_hits(groups);
+    let mut plan = Plan { hits: Vec::new(), missing: Vec::new() };
+    for member in &preset.members {
+        let of_member = |h: &&Hit| h.repo == member.repo && h.app.id == member.app_id;
+        let task = (target != MAIN).then(|| all.iter().filter(of_member).find(|h| h.worktree == target)).flatten();
+        match task.or_else(|| all.iter().filter(of_member).find(|h| h.main)) {
+            Some(hit) => plan.hits.push(hit.clone()),
+            None => plan.missing.push(member.clone()),
+        }
+    }
+    plan
+}
+
+fn member_label(m: &Member) -> String {
+    format!("{} (repo {})", if m.name.is_empty() { &m.app_id } else { &m.name }, m.repo)
+}
+
+fn saved_presets(hub: &Hub) -> Result<Vec<Preset>, String> {
+    let presets = match hub.ui_state()? {
+        Some(text) => presets::parse(&text)?,
+        None => Vec::new(),
+    };
+    if presets.is_empty() {
+        return Err("no presets saved: the user creates them in the Spawner window".into());
+    }
+    Ok(presets)
+}
+
+/// The preset and the worktree it runs in: `worktree` if given, else the one the preset is set to.
+/// A preset whose worktree is gone runs from main, as in the window; an explicit worktree that does not exist is an error.
+async fn preset_and_target(hub: &Arc<Hub>, a: &PresetArgs) -> Result<(Preset, String, Vec<Group>), String> {
+    let presets = saved_presets(hub)?;
+    let wanted = a.preset.as_deref().ok_or("name a preset: hub_list_presets shows them.")?;
+    let Some(preset) = presets::find(&presets, wanted) else {
+        let names = presets.iter().map(|p| format!("  {}", p.name)).collect::<Vec<_>>().join("\n");
+        return Err(format!("no preset matches {wanted:?}. Presets:\n{names}"));
+    };
+    let mut groups = hub.groups();
+    if groups.is_empty() {
+        groups = hub.rescan().await;
+    }
+    let target = match a.worktree.as_deref() {
+        Some(w) if w.eq_ignore_ascii_case(MAIN) => MAIN.to_string(),
+        Some(w) => task_worktree(&groups, w).ok_or_else(|| {
+            let known = groups.iter().filter(|g| !g.main).map(|g| g.id.as_str()).collect::<Vec<_>>().join(", ");
+            format!("no worktree {w:?}. Worktrees: main, {known}")
+        })?,
+        None => task_worktree(&groups, &preset.target).unwrap_or_else(|| MAIN.to_string()),
+    };
+    Ok((preset.clone(), target, groups))
+}
+
+fn preset_report(preset: &Preset, target: &str, verb: &str, plan: &Plan, results: Vec<Out>) -> Out {
+    let mut text = format!("preset {:?} in {target}: {verb} {} app{}", preset.name, plan.hits.len(), if plan.hits.len() == 1 { "" } else { "s" });
+    if !plan.missing.is_empty() {
+        let names = plan.missing.iter().map(member_label).collect::<Vec<_>>().join(", ");
+        text.push_str(&format!("\nnot found in {target} or main, skipped: {names}"));
+    }
+    let error = plan.hits.is_empty() || results.iter().any(|r| r.error);
+    for r in results {
+        text.push_str("\n\n");
+        text.push_str(&r.text);
+    }
+    Out { text, error }
+}
+
+async fn start_preset(hub: &Arc<Hub>, a: PresetArgs) -> Out {
+    let (preset, target, groups) = match preset_and_target(hub, &a).await {
+        Ok(found) => found,
+        Err(e) => return bad(e),
+    };
+    let plan = plan_preset(&groups, &preset, &target);
+    let wait = a.wait.unwrap_or(true);
+    let timeout = Duration::from_secs(a.timeout_seconds.unwrap_or(START_TIMEOUT).clamp(1, 600));
+    let lines = a.log_lines.unwrap_or(10).min(MAX_TAIL);
+    let runs: Vec<_> = plan
+        .hits
+        .iter()
+        .cloned()
+        .map(|hit| {
+            let hub = hub.clone();
+            tokio::spawn(async move { start_flow(&hub, &hit, &HashMap::new(), &[], wait, timeout, lines).await })
+        })
+        .collect();
+    let mut results = Vec::new();
+    for run in runs {
+        results.push(run.await.unwrap_or_else(|e| bad(format!("a start was interrupted: {e}"))));
+    }
+    preset_report(&preset, &target, "started", &plan, results)
+}
+
+async fn stop_preset(hub: &Arc<Hub>, a: PresetArgs) -> Out {
+    let (preset, target, groups) = match preset_and_target(hub, &a).await {
+        Ok(found) => found,
+        Err(e) => return bad(e),
+    };
+    let plan = plan_preset(&groups, &preset, &target);
+    let mut results = Vec::new();
+    for hit in &plan.hits {
+        results.push(stop_flow(hub, hit).await);
+    }
+    preset_report(&preset, &target, "stopped", &plan, results)
+}
+
+fn presets_json(hub: &Hub, presets: &[Preset], groups: &[Group]) -> Value {
+    let states = hub.states();
+    let list: Vec<Value> = presets
+        .iter()
+        .map(|p| {
+            let target = task_worktree(groups, &p.target).unwrap_or_else(|| MAIN.to_string());
+            let plan = plan_preset(groups, p, &target);
+            let repos: Vec<&str> = p.members.iter().map(|m| m.repo.as_str()).collect();
+            let runs_in: Vec<&str> = groups.iter().filter(|g| !g.main && g.projects.iter().any(|pr| repos.contains(&pr.repo.as_str()))).map(|g| g.id.as_str()).collect();
+            let apps: Vec<Value> = plan
+                .hits
+                .iter()
+                .map(|h| json!({"app": h.app.name, "repo": h.repo, "worktree": h.worktree, "instance": h.instance, "state": kind(states.get(&h.instance))}))
+                .chain(plan.missing.iter().map(|m| json!({"app": member_label(m), "repo": m.repo, "missing": true})))
+                .collect();
+            json!({"preset": p.name, "id": p.id, "worktree": target, "can_run_in": runs_in, "apps": apps})
+        })
+        .collect();
+    json!({"presets": list})
+}
+
 async fn call_tool(hub: &Arc<Hub>, params: &Value) -> Result<Value, (i32, String)> {
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
     let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
@@ -697,6 +871,15 @@ async fn call_tool(hub: &Arc<Hub>, params: &Value) -> Result<Value, (i32, String
                 }
             }
         }
+        "hub_list_presets" => match saved_presets(hub) {
+            Err(e) => ok(e),
+            Ok(presets) => {
+                let groups = if hub.groups().is_empty() { hub.rescan().await } else { hub.groups() };
+                ok(serde_json::to_string_pretty(&presets_json(hub, &presets, &groups)).unwrap_or_default())
+            }
+        },
+        "hub_start_preset" => start_preset(hub, serde_json::from_value(args).map_err(invalid)?).await,
+        "hub_stop_preset" => stop_preset(hub, serde_json::from_value(args).map_err(invalid)?).await,
         "hub_script_guide" => ok(script_guide(&hub.roots())),
         "hub_rescan" => {
             let groups = hub.rescan().await;
@@ -826,6 +1009,36 @@ mod tests {
     #[test]
     fn nothing_matching_is_reported_as_missing() {
         assert!(matches!(pick(&groups(), &target(Some("Nope"), None, None)), Err(Miss::Nothing)));
+    }
+
+    fn bill_and_account() -> Preset {
+        let member = |repo: &str, app: &str| Member { repo: repo.into(), app_id: format!("{app}.csproj"), name: app.into() };
+        Preset { id: "p".into(), name: "Bill".into(), members: vec![member("bill", "Acme.Bill.API"), member("account", "Acme.Account.App")], target: "PAYMENT-9986".into() }
+    }
+
+    #[test]
+    fn a_preset_runs_from_its_worktree() {
+        let plan = plan_preset(&groups(), &bill_and_account(), "PAYMENT-9986");
+        assert!(plan.missing.is_empty());
+        assert_eq!(plan.hits.iter().map(|h| h.worktree.as_str()).collect::<Vec<_>>(), ["PAYMENT-9986", "PAYMENT-9986"]);
+    }
+
+    #[test]
+    fn a_repo_the_worktree_lacks_falls_back_to_main_and_a_repo_main_lacks_is_missing() {
+        let mut g = groups();
+        g[0].projects.remove(0);
+        let plan = plan_preset(&g, &bill_and_account(), "PAYMENT-9986");
+        assert_eq!(plan.hits.iter().map(|h| (h.repo.as_str(), h.worktree.as_str())).collect::<Vec<_>>(), [("bill", "main"), ("account", "PAYMENT-9986")]);
+        let on_main = plan_preset(&g, &bill_and_account(), MAIN);
+        assert_eq!(on_main.hits.len(), 1);
+        assert_eq!(on_main.missing[0].repo, "account");
+    }
+
+    #[test]
+    fn worktrees_are_named_by_id_or_label_and_main_is_not_one() {
+        let g = groups();
+        assert_eq!(task_worktree(&g, "payment-9986").as_deref(), Some("PAYMENT-9986"));
+        assert_eq!(task_worktree(&g, "main"), None);
     }
 
     #[test]

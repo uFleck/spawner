@@ -7,6 +7,7 @@ mod level;
 mod mcp;
 mod model;
 mod notify;
+mod presets;
 mod roots;
 mod runner;
 mod watch;
@@ -108,8 +109,8 @@ async fn restore_worktrees(hub: State<'_, Arc<Hub>>, removed: Vec<worktree::Remo
     hub.inner().restore(removed).await
 }
 
-/// Presets and pins, kept as one opaque JSON document the UI owns. They live in the app data directory so a webview reset cannot wipe them.
-const UI_STATE_FILE: &str = "ui-state.json";
+/// Presets and pins, kept as one JSON document the UI owns (the MCP server reads the presets from it). They live in the app data directory so a webview reset cannot wipe them.
+const UI_STATE_FILE: &str = presets::FILE_NAME;
 
 #[tauri::command]
 fn load_ui_state(app: AppHandle) -> Result<Option<String>, String> {
@@ -370,6 +371,7 @@ pub fn run() {
             let mcp_state: McpState = Arc::default();
             hub.persist_roots_to(roots_file);
             hub.persist_watch_to(data_file(app.handle(), watch::FILE_NAME)?);
+            hub.read_ui_state_from(data_file(app.handle(), UI_STATE_FILE)?);
             app.manage(hub.clone());
             app.manage(mcp_state.clone());
             let port_file = data_file(app.handle(), "mcp-port.txt")?;

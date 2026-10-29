@@ -53,6 +53,8 @@ pub struct Hub {
     /// `watch::key`s of the apps that run under `dotnet watch`.
     watched: Mutex<BTreeSet<String>>,
     watch_file: OnceLock<PathBuf>,
+    /// The window's saved presets and pins. Only read here; the UI writes it.
+    ui_state_file: OnceLock<PathBuf>,
     groups: Mutex<Vec<Group>>,
     live: Mutex<HashMap<String, Live>>,
     logs: Mutex<VecDeque<LogLine>>,
@@ -83,6 +85,7 @@ impl Hub {
             roots_file: OnceLock::new(),
             watched: Mutex::new(BTreeSet::new()),
             watch_file: OnceLock::new(),
+            ui_state_file: OnceLock::new(),
             groups: Mutex::new(Vec::new()),
             live: Mutex::new(HashMap::new()),
             logs: Mutex::new(VecDeque::new()),
@@ -115,6 +118,21 @@ impl Hub {
     pub fn persist_watch_to(&self, file: PathBuf) {
         *self.watched.lock().unwrap() = watch::load(&file);
         let _ = self.watch_file.set(file);
+    }
+
+    /// Where the window saves its presets, so `ui_state` can read them.
+    pub fn read_ui_state_from(&self, file: PathBuf) {
+        let _ = self.ui_state_file.set(file);
+    }
+
+    /// The window's saved state as text, or `None` before the window has saved anything.
+    pub fn ui_state(&self) -> Result<Option<String>, String> {
+        let Some(file) = self.ui_state_file.get() else { return Ok(None) };
+        match std::fs::read_to_string(file) {
+            Ok(text) => Ok(Some(text)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("cannot read {}: {e}", file.display())),
+        }
     }
 
     /// The `watch::key`s of the watched apps.

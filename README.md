@@ -118,6 +118,9 @@ The status bar shows the port, and clicking it opens the setup guide. The guide 
 | `hub_logs` | Reads logs with `since_seq` polling, `min_level`, `query`/`regex` and a `tail` limit. |
 | `hub_clear_logs` | Clears one app's logs, or all. |
 | `hub_rescan` | Rescans the configured folders for new worktrees and apps. |
+| `hub_list_presets` | The presets saved in the window, with the worktrees each can run in and how its apps resolve in its default worktree. |
+| `hub_start_preset` | Starts every app of a preset concurrently, in its own worktree or the `worktree` given. Apps whose repo the worktree lacks run from main, as in the window. |
+| `hub_stop_preset` | Stops the active apps of a preset. |
 
 An app is selected by `app` (plus `worktree` or `repo` when the name is ambiguous), by `path` (the agent's working directory), or by `instance`. Log levels are read in the backend (`level.rs`) from .NET console, NLog and MSBuild formats and from the common markers of npm, node, vite, tsc, cargo and python, and an indented line takes the level of the entry above it unless it states its own.
 
