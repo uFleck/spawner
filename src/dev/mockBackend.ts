@@ -134,6 +134,7 @@ const DEV = "C:/dev";
 /** `?noscripts` starts without any script, to show the empty state. */
 const EMPTY_SCRIPTS = new URLSearchParams(location.search).has("noscripts");
 let settings = { notifyScripts: false, companion: true };
+let startOnLogin = false;
 const watched = new Set<string>();
 const SAMPLE_FOLDERS = ["D:/side/notes-api", "C:/scripts/nightly", "C:/work/clients"];
 
@@ -408,6 +409,8 @@ export function installMock() {
     companion_drag: () => undefined,
     companion_dismiss: () => undefined,
     set_settings: (a) => void (settings = a.settings as typeof settings),
+    get_start_on_login: () => startOnLogin,
+    set_start_on_login: (a) => void (startOnLogin = a.on as boolean),
   };
 
   const w = window as unknown as Record<string, unknown>;

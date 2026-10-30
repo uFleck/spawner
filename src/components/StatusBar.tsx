@@ -34,6 +34,17 @@ export function StatusBar({ snap, follow, onGuide }: { snap: Snapshot; follow: b
       {import.meta.env.PROD && <UpdateButton snap={snap} />}
       <button
         type="button"
+        className={`mcp${snap.startOnLogin ? " on" : ""}`}
+        data-tip={snap.startOnLogin ? "Spawner starts with you and waits in the tray. Click to turn off" : "Start Spawner when you log in, hidden in the tray"}
+        data-side="top"
+        aria-pressed={snap.startOnLogin}
+        onClick={() => void actions.setStartOnLogin(!snap.startOnLogin)}
+      >
+        <i className={snap.startOnLogin ? "ph-fill ph-power" : "ph ph-power"} />
+        start on login
+      </button>
+      <button
+        type="button"
         className={`mcp${snap.settings.companion ? " on" : ""}`}
         data-tip={snap.settings.companion ? "The companion shows running apps' logs at the screen edge while Spawner is in the background. Click to turn off" : "Show running apps' logs at the screen edge while Spawner is in the background"}
         data-side="top"

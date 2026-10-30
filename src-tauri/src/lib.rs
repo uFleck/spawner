@@ -284,11 +284,38 @@ fn enable_autostart_once(app: &AppHandle) {
     }
 }
 
+/// The tray's "Start on login" check, kept in managed state so the window toggle can update it.
+struct TrayLogin(CheckMenuItem<tauri::Wry>);
+
+/// The OS owns start-on-login (the login entry), so the state is read and written there, not in the saved settings.
+fn apply_start_on_login(app: &AppHandle, on: bool) -> Result<(), String> {
+    let autolaunch = app.autolaunch();
+    let result = if on { autolaunch.enable() } else { autolaunch.disable() };
+    result.map_err(|e| e.to_string())?;
+    let actual = autolaunch.is_enabled().map_err(|e| e.to_string())?;
+    if let Some(login) = app.try_state::<TrayLogin>() {
+        let _ = login.0.set_checked(actual);
+    }
+    let _ = app.emit("start-on-login-changed", actual);
+    Ok(())
+}
+
+#[tauri::command]
+fn get_start_on_login(app: AppHandle) -> Result<bool, String> {
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_start_on_login(app: AppHandle, on: bool) -> Result<(), String> {
+    apply_start_on_login(&app, on)
+}
+
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Show Spawner", true, None::<&str>)?;
     let login = CheckMenuItem::with_id(app, "login", "Start on login", true, app.autolaunch().is_enabled().unwrap_or(false), None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &login, &quit])?;
+    app.manage(TrayLogin(login.clone()));
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip("Spawner")
         .menu(&menu)
@@ -296,9 +323,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(move |app, event| match event.id().as_ref() {
             "show" => show_main_window(app),
             "login" => {
-                let autolaunch = app.autolaunch();
-                let _ = if login.is_checked().unwrap_or(false) { autolaunch.enable() } else { autolaunch.disable() };
-                let _ = login.set_checked(autolaunch.is_enabled().unwrap_or(false));
+                let _ = apply_start_on_login(app, login.is_checked().unwrap_or(false));
             }
             "quit" => app.exit(0),
             _ => {}
@@ -404,6 +429,8 @@ pub fn run() {
             mcp_info,
             get_settings,
             set_settings,
+            get_start_on_login,
+            set_start_on_login,
             groups,
             companion_open,
             companion_dismiss,

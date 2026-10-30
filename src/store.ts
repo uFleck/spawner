@@ -84,6 +84,8 @@ export interface Snapshot {
   logs: LogLine[];
   mcp: McpInfo | null;
   settings: Settings;
+  /** Whether Spawner starts when the user logs in. Read from the OS login entry, not from `settings`. */
+  startOnLogin: boolean;
   loading: boolean;
   /** Whether the first scan has finished. Until then `groups` is empty because nothing was looked at yet, not because the folders are gone. */
   scanned: boolean;
@@ -130,6 +132,7 @@ let snapshot: Snapshot = {
   logs: [],
   mcp: null,
   settings: { notifyScripts: false, companion: true },
+  startOnLogin: false,
   loading: true,
   scanned: false,
   error: null,
@@ -618,6 +621,16 @@ export const actions = {
   openPort: (port: number) => api.openPort(port).catch(fail),
   setNotifyScripts: (notifyScripts: boolean) => saveSettings({ notifyScripts }),
   setCompanion: (companion: boolean) => saveSettings({ companion }),
+  setStartOnLogin: async (startOnLogin: boolean) => {
+    const previous = snapshot.startOnLogin;
+    set({ startOnLogin });
+    try {
+      await api.setStartOnLogin(startOnLogin);
+    } catch (e) {
+      set({ startOnLogin: previous });
+      fail(e);
+    }
+  },
   dismissError: () => set({ error: null, portConflict: null }),
 };
 
@@ -641,11 +654,13 @@ export async function initStore() {
   await listen<LogLine>("log-line", (e) => enqueueLog(e.payload));
   await listen<Group[]>("groups-changed", (e) => set({ groups: e.payload, scanned: true }));
   await listen<Settings>("settings-changed", (e) => set({ settings: e.payload }));
+  await listen<boolean>("start-on-login-changed", (e) => set({ startOnLogin: e.payload }));
   await listen<string | null>("logs-cleared", (e) => set({ logs: e.payload ? snapshot.logs.filter((l) => l.instance !== e.payload) : [] }));
   void watchMcp();
   await loadUiState();
   set({ roots: await api.getRoots() });
   set({ settings: await api.getSettings().catch(() => snapshot.settings) });
+  set({ startOnLogin: await api.getStartOnLogin().catch(() => snapshot.startOnLogin) });
   set({ watched: await api.getWatched().catch(() => []) });
   await actions.refresh();
   const states = await api.instanceStates();
