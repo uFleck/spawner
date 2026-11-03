@@ -1,9 +1,9 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { isActive, type LogLine } from "../api";
+import { isActive, parseInstanceId, type LogLine } from "../api";
 import { buildRows, clock, colorVar, highlightRegex, isOwnFrame, matcherFor, squashRows, type Level, type Row, type Run } from "../logModel";
 import { actions, indexInstances, type InstanceInfo, type Snapshot } from "../store";
 import { useRowSelection } from "../useRowSelection";
-import { useContextMenu } from "./ContextMenu";
+import { useContextMenu, type MenuItem } from "./ContextMenu";
 import { IconButton } from "./IconButton";
 
 const MAX_RENDERED = 1_500;
@@ -389,6 +389,44 @@ export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, on
   const sources = [...counts.keys()].filter((id) => instances.has(id));
   let prevInstance = "";
 
+  const lineText = (r: Row) => `${clock(r.line.ts)} ${instances.get(r.line.instance)?.appName ?? r.line.instance} ${r.line.text}`;
+
+  /** Right-click on one app's tab. */
+  const appMenu = (id: string): MenuItem[] => {
+    const active = isActive(snap.states[id]);
+    const name = instances.get(id)?.appName ?? id;
+    return [
+      {
+        label: active || snap.states[id]?.kind === "failed" ? "Restart" : "Start",
+        icon: "ph ph-arrow-clockwise",
+        run: () => {
+          const { projectId, appId } = parseInstanceId(id);
+          void actions.restartApp(projectId, appId);
+        },
+      },
+      { label: "Stop", icon: "ph ph-stop", disabled: !active, run: () => void actions.stop(id) },
+      "sep",
+      { label: "Show only this app", icon: "ph ph-funnel", run: () => onFocus(id) },
+      { label: "Copy this app’s logs", icon: "ph ph-copy", run: () => ctx.copy(rows.filter((r) => r.line.instance === id).map(lineText).join("\n"), `${name} logs`) },
+      {
+        label: "Clear this app’s logs",
+        icon: "ph ph-eraser",
+        run: () => {
+          if (!hidden.has(id) && sources.every((s) => s === id || hidden.has(s))) onFocus(id);
+          void actions.clearLogs(id);
+        },
+      },
+    ];
+  };
+
+  /** Right-click on the empty space of the tab row. */
+  const allMenu = (): MenuItem[] => [
+    { label: "Restart all", icon: "ph ph-arrow-clockwise", disabled: !sources.some((id) => isActive(snap.states[id])), run: () => void actions.restartAll() },
+    { label: "Stop all", icon: "ph ph-stop", disabled: !sources.some((id) => isActive(snap.states[id])), run: () => void actions.stopAll() },
+    "sep",
+    { label: "Copy all logs", icon: "ph ph-copy", run: () => ctx.copy(rows.map(lineText).join("\n"), "All logs") },
+  ];
+
   const opts: { icon: string; label: string; kbd?: string; pressed?: boolean; danger?: boolean; run: () => void }[] = [
     { icon: "ph ph-info", label: "Hub messages", pressed: showSys, run: () => setShowSys(!showSys) },
     { icon: "ph ph-clock", label: "Timestamps", pressed: showTime, run: () => setShowTime(!showTime) },
@@ -463,7 +501,7 @@ export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, on
       )}
 
       {sources.length > 0 && (
-        <div className="sources">
+        <div className="sources" onContextMenu={(e) => ctx.show(e, allMenu())}>
           {sources.map((id) => {
             const info = instances.get(id)!;
             const c = counts.get(id)!;
@@ -472,12 +510,13 @@ export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, on
                 key={id}
                 className={`chip${hidden.has(id) ? " off" : ""}${selected === id ? " cur" : ""}`}
                 style={{ ["--c" as string]: colorVar(id) }}
+                onContextMenu={(e) => ctx.show(e, appMenu(id))}
               >
                 <button
                   type="button"
                   className="chip-main"
                   aria-pressed={!hidden.has(id)}
-                  data-tip="Ctrl + click: focus only this one"
+                  data-tip="Ctrl + click: focus only this one · right-click for options"
                   onClick={(e) => (e.ctrlKey || e.metaKey ? onFocus(id) : toggleSource(id))}
                 >
                   <span className="cd" />
@@ -486,50 +525,9 @@ export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, on
                   <span className="n">{c.n}</span>
                   {c.err > 0 && <span className="n e">{c.err} err</span>}
                 </button>
-                <button
-                  type="button"
-                  className="chip-x"
-                  aria-label={isActive(snap.states[id]) ? `Stop ${info.appName}` : `Close ${info.appName}`}
-                  data-tip={isActive(snap.states[id]) ? "Close (stops the app)" : "Close (clears its log)"}
-                  onClick={() => {
-                    if (isActive(snap.states[id])) return void actions.stop(id);
-                    if (!hidden.has(id) && sources.every((s) => s === id || hidden.has(s))) onFocus(id);
-                    void actions.clearLogs(id);
-                  }}
-                >
-                  <i className="ph ph-x" aria-hidden="true" />
-                </button>
               </div>
             );
           })}
-          <div className="sources-act">
-            <button
-              type="button"
-              className="chip-act"
-              disabled={sources.every((id) => isActive(snap.states[id]))}
-              data-tip="Clear the logs of apps that are not running"
-              onClick={() => {
-                const kept = sources.filter((id) => isActive(snap.states[id]));
-                if (kept.length && kept.every((id) => hidden.has(id))) onHidden(new Set());
-                void actions.cleanStopped();
-              }}
-            >
-              <i className="ph ph-broom" aria-hidden="true" />
-              Clean
-            </button>
-            <button
-              type="button"
-              className="chip-act danger"
-              data-tip="Stop every app and clear all logs"
-              onClick={() => {
-                onHidden(new Set());
-                void actions.closeAll();
-              }}
-            >
-              <i className="ph ph-x-circle" aria-hidden="true" />
-              Close all
-            </button>
-          </div>
         </div>
       )}
 

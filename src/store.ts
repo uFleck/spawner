@@ -595,18 +595,6 @@ export const actions = {
     await api.clearLogs(id);
     set({ logs: id ? snapshot.logs.filter((l) => l.instance !== id) : [] });
   },
-  /** Clears the log of every app that is not running, which drops their chips. */
-  async cleanStopped() {
-    const ids = [...new Set(snapshot.logs.map((l) => l.instance))].filter((id) => !isLive(id));
-    await Promise.all(ids.map((id) => actions.clearLogs(id)));
-  },
-  /** Stops every running app, waits for them to end, then clears all logs. */
-  async closeAll() {
-    const ids = activeIds();
-    await stopInstances(ids);
-    await Promise.all(ids.map(untilStopped));
-    await actions.clearLogs();
-  },
   /** Opens the folder picker, then adds the chosen folder. */
   async addFolder() {
     try {
