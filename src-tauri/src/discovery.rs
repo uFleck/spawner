@@ -35,7 +35,7 @@ fn scan_root(root: &Path) -> Vec<Found> {
     if !root.is_dir() {
         return Vec::new();
     }
-    let mut found = if is_git(root) && !holds_checkouts(root) { scan_repo(root) } else { scan_folder(root) };
+    let mut found = if is_git(root) && !holds_checkouts(root) { scan_repo(root, &mut HashSet::new()) } else { scan_folder(root) };
     let mut seen = HashSet::new();
     found.retain(|f| seen.insert(roots::key(&normalize(&f.path))));
     found
@@ -50,13 +50,18 @@ fn scan_folder(root: &Path) -> Vec<Found> {
     let Ok(entries) = std::fs::read_dir(root) else {
         return found;
     };
+    // `git worktree list` names every worktree of a repo, so each checkout folder found here would otherwise
+    // re-walk all of its siblings: a repo with N worktrees in the folder cost N*N walks, not N.
+    let mut covered = HashSet::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if !entry.file_type().is_ok_and(|t| t.is_dir()) {
             continue;
         }
         if is_git(&path) {
-            found.extend(scan_repo(&path));
+            if !covered.contains(&roots::key(&normalize(&path))) {
+                found.extend(scan_repo(&path, &mut covered));
+            }
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -86,14 +91,17 @@ fn holds_checkouts(dir: &Path) -> bool {
     std::fs::read_dir(dir).into_iter().flatten().flatten().any(|e| e.file_type().is_ok_and(|t| t.is_dir()) && is_git(&e.path()))
 }
 
-fn scan_repo(path: &Path) -> Vec<Found> {
+/// Adds every worktree of the repo to `covered`, so a caller can skip the other checkouts of the same repo.
+fn scan_repo(path: &Path, covered: &mut HashSet<String>) -> Vec<Found> {
     let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
         return Vec::new();
     };
     let Some(porcelain) = git_worktree_list(path) else {
         return Vec::new();
     };
-    parse_worktrees(&porcelain)
+    let worktrees = parse_worktrees(&porcelain);
+    covered.extend(worktrees.iter().map(|w| roots::key(&normalize(&w.path))));
+    worktrees
         .into_iter()
         .filter(|w| w.path.is_dir())
         .map(|w| Found {
