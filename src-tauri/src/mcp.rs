@@ -27,6 +27,7 @@ const MAX_TAIL: usize = 1_000;
 const START_TIMEOUT: u64 = 90;
 const STOP_TIMEOUT: u64 = 20;
 const PORT_GRACE: Duration = Duration::from_secs(3);
+const FAILED_LINES: usize = 10;
 
 const INSTRUCTIONS: &str = "Spawner runs and tracks the user's apps and scripts across the folders the user added to it, and the git worktrees in them. \
 Use these tools instead of running dev servers or builds in a terminal, so the user sees every process and log in the Spawner window. \
@@ -182,11 +183,11 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "hub_start",
-            "description": "Build and start an app in Hub, and return the log lines from this run. By default waits: for a service (mode \"service\") until it is running, has exited or has failed; for a task (mode \"task\") until it has finished, and then reports its exit code (a nonzero code is an error result). A task that is still running when timeout_seconds passes is reported as still running; poll it with hub_logs.",
+            "description": "Build and start an app in Hub, and return the log lines from this run. By default waits: for a service (mode \"service\") until it is running, has exited or has failed; for a task (mode \"task\") until it has finished, and then reports its exit code (a nonzero code is an error result). A task that is still running when timeout_seconds passes is reported as still running; poll it with hub_logs. Cheapest form: log_lines 0 returns the status and instance only (a failed run still shows its last 10 lines).",
             "inputSchema": with_target(json!({
                 "wait": {"type": "boolean", "description": "Wait for a service to be running, or a task to finish. Default true."},
                 "timeout_seconds": {"type": "integer", "description": format!("How long to wait. Default {START_TIMEOUT}.")},
-                "log_lines": {"type": "integer", "description": "Log lines to return from this run. Default 40."},
+                "log_lines": {"type": "integer", "description": "Log lines to return from this run. Default 40. 0 returns the status only (a failed run still shows 10)."},
                 "params": {"type": "object", "additionalProperties": true, "description": "Values for a script's declared params, by param name (see `params` in hub_list_apps): {\"who\": \"ana@example.com\", \"verbose\": true}. A missing required param is refused before the script starts. Scripts only."},
                 "args": {"type": "array", "items": {"type": "string"}, "description": "Extra arguments appended to a script's command, after its params, for a script that documents a usage instead of params. Scripts only."}
             }))
@@ -206,7 +207,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "hub_logs",
-            "description": "Read log lines. With no app selector it merges every instance. Poll by passing the next_since value from the previous call as since_seq.",
+            "description": "Read log lines. With no app selector it merges every instance. Cheapest read: pass the next_since value from the previous call as since_seq, select one app, and keep tail small (the default is 100 lines, capped at about 30 KB). Use query to narrow to the lines you need.",
             "inputSchema": with_target(json!({
                 "since_seq": {"type": "integer", "description": "Only lines with a higher seq."},
                 "tail": {"type": "integer", "description": format!("Return the last N matching lines. Default {DEFAULT_TAIL}, max {MAX_TAIL}.")},
@@ -228,13 +229,13 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "hub_start_preset",
-            "description": "Start every app of a preset, concurrently, and return the log lines of each run. Each app runs from the worktree when it has that repo, else from the main checkout. Waits like hub_start (a service until it is running, a task until it has finished). An app that is already active is left as it is.",
+            "description": "Start every app of a preset, concurrently, and return the log lines of each run. Each app runs from the worktree when it has that repo, else from the main checkout. Waits like hub_start (a service until it is running, a task until it has finished). An app that is already active is left as it is. Cheapest form: log_lines 0 returns one status line per app (a failed app still shows its last 10 lines).",
             "inputSchema": {"type": "object", "properties": {
                 "preset": {"type": "string", "description": "Preset name or id from hub_list_presets. Case-insensitive."},
                 "worktree": {"type": "string", "description": "Worktree id to run it in, such as \"PAYMENT-9986\" or \"main\". Default: the worktree the preset is set to."},
                 "wait": {"type": "boolean", "description": "Wait for each service to be running, or each task to finish. Default true."},
                 "timeout_seconds": {"type": "integer", "description": format!("How long to wait. Default {START_TIMEOUT}.")},
-                "log_lines": {"type": "integer", "description": "Log lines to return per app. Default 10."}
+                "log_lines": {"type": "integer", "description": "Log lines to return per app. Default 10. 0 returns one status line per app (a failed app still shows 10)."}
             }, "required": ["preset"]}
         },
         {
@@ -607,11 +608,13 @@ async fn wait_for(hub: &Arc<Hub>, id: &str, timeout: Duration, done: fn(&Instanc
 }
 
 fn run_report(hub: &Hub, hit: &Hit, before: u64, lines: usize, state: Option<&InstanceState>, waited: Duration) -> Out {
-    let (rows, total) = select_logs(
-        hub.logs_since(before),
-        &LogQuery { ids: Some(vec![hit.instance.clone()]), since: before, min_level: None, include_hub: true, text: None, tail: lines },
-    );
-    let labels = HashMap::from([(hit.instance.clone(), hit.label())]);
+    let failed = match state {
+        Some(InstanceState::Failed { .. }) => true,
+        Some(InstanceState::Exited { code: Some(c) }) => *c != 0,
+        _ => false,
+    };
+    // log_lines 0 gives the status only; a failed run always keeps its last lines.
+    let lines = if failed { lines.max(FAILED_LINES) } else { lines };
     let head = match state {
         Some(InstanceState::Running { .. }) if hit.app.mode == AppMode::Service => {
             let url = shown_port(&hit.app, hub.port_of(&hit.instance)).map(|p| format!(" at http://localhost:{p}")).unwrap_or_default();
@@ -625,11 +628,14 @@ fn run_report(hub: &Hub, hit: &Hit, before: u64, lines: usize, state: Option<&In
             waited.as_secs()
         ),
     };
-    let failed = match state {
-        Some(InstanceState::Failed { .. }) => true,
-        Some(InstanceState::Exited { code: Some(c) }) => *c != 0,
-        _ => false,
-    };
+    if lines == 0 {
+        return Out { text: format!("{head}\ninstance: {}", hit.instance), error: failed };
+    }
+    let (rows, total) = select_logs(
+        hub.logs_since(before),
+        &LogQuery { ids: Some(vec![hit.instance.clone()]), since: before, min_level: None, include_hub: true, text: None, tail: lines },
+    );
+    let labels = HashMap::from([(hit.instance.clone(), hit.label())]);
     let body = format!("{head}\ninstance: {}\n--- log lines from this run ---\n{}", hit.instance, render_logs(&rows, &labels, total));
     Out { text: body, error: failed }
 }
