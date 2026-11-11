@@ -113,13 +113,16 @@ export type InstanceState =
   | { kind: "exited"; code: number | null }
   | { kind: "failed"; message: string };
 
-export interface ClaudeStatus {
+export type AgentKind = "claude" | "opencode";
+
+export interface AgentStatus {
   installed: boolean;
   version: string | null;
 }
 
 export type LinkStatus =
   | { state: "connected" }
+  | { state: "configured" }
   | { state: "failing"; detail: string }
   | { state: "stale"; configured: string }
   | { state: "missing" };
@@ -208,10 +211,10 @@ export const api = {
   setSettings: (settings: Settings) => invoke<void>("set_settings", { settings }),
   getStartOnLogin: () => invoke<boolean>("get_start_on_login"),
   setStartOnLogin: (on: boolean) => invoke<void>("set_start_on_login", { on }),
-  claudeCheck: () => invoke<ClaudeStatus>("claude_check"),
-  claudeLink: () => invoke<LinkStatus>("claude_link"),
-  claudeConnect: () => invoke<void>("claude_connect"),
-  claudeAddGuidance: (snippet: string) => invoke<string>("claude_add_guidance", { snippet }),
+  agentCheck: (kind: AgentKind) => invoke<AgentStatus>("agent_check", { kind }),
+  agentLink: (kind: AgentKind) => invoke<LinkStatus>("agent_link", { kind }),
+  agentConnect: (kind: AgentKind) => invoke<void>("agent_connect", { kind }),
+  agentAddGuidance: (kind: AgentKind, snippet: string) => invoke<string>("agent_add_guidance", { kind, snippet }),
   /** The `watchKey`s of the apps that run under `dotnet watch`. */
   getWatched: () => invoke<string[]>("get_watched"),
   /** Takes effect the next time the app starts. Returns the new list. */

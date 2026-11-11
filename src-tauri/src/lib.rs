@@ -187,25 +187,25 @@ fn mcp_info(state: State<'_, McpState>) -> McpInfo {
 }
 
 #[tauri::command]
-async fn claude_check() -> agent::ClaudeStatus {
-    tauri::async_runtime::spawn_blocking(agent::check_claude).await.unwrap_or(agent::ClaudeStatus { installed: false, version: None })
+async fn agent_check(kind: agent::Agent) -> agent::AgentStatus {
+    tauri::async_runtime::spawn_blocking(move || agent::check(kind)).await.unwrap_or(agent::AgentStatus { installed: false, version: None })
 }
 
 #[tauri::command]
-async fn claude_link(state: State<'_, McpState>) -> Result<agent::LinkStatus, String> {
+async fn agent_link(kind: agent::Agent, state: State<'_, McpState>) -> Result<agent::LinkStatus, String> {
     let url = state.lock().unwrap().url.clone().unwrap_or_default();
-    tauri::async_runtime::spawn_blocking(move || agent::link_status(&url)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || agent::link_status(kind, &url)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-async fn claude_connect(state: State<'_, McpState>) -> Result<(), String> {
+async fn agent_connect(kind: agent::Agent, state: State<'_, McpState>) -> Result<(), String> {
     let url = state.lock().unwrap().url.clone().ok_or("the MCP server is not running")?;
-    tauri::async_runtime::spawn_blocking(move || agent::connect(&url)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || agent::connect(kind, &url)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-async fn claude_add_guidance(snippet: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || agent::add_guidance(&snippet)).await.map_err(|e| e.to_string())?
+async fn agent_add_guidance(kind: agent::Agent, snippet: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || agent::add_guidance(kind, &snippet)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -442,10 +442,10 @@ pub fn run() {
             set_watch,
             load_ui_state,
             save_ui_state,
-            claude_check,
-            claude_link,
-            claude_connect,
-            claude_add_guidance,
+            agent_check,
+            agent_link,
+            agent_connect,
+            agent_add_guidance,
             open_port,
             start,
             stop,

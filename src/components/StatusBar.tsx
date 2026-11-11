@@ -58,7 +58,7 @@ export function StatusBar({ snap, follow, onGuide }: { snap: Snapshot; follow: b
         <button
           type="button"
           className={`mcp${mcp.url ? (mcp.portChanged ? " warn" : "") : " bad"}`}
-          data-tip={mcp.url ? (mcp.portChanged ? "The usual port was busy, so Hub moved. Click to update Claude Code." : "MCP server for AI agents. Click to set up Claude Code.") : (mcp.error ?? "MCP server is not running")}
+          data-tip={mcp.url ? (mcp.portChanged ? "The usual port was busy, so Hub moved. Click to update your AI agent." : "MCP server for AI agents. Click to set one up.") : (mcp.error ?? "MCP server is not running")}
           data-side="top"
           onClick={onGuide}
         >

@@ -67,7 +67,7 @@ export function Palette({ open, snap, onClose, onToggleSide, onTheme, onToast, o
         label: `Remove folder ${rootName(r)}`,
         run: () => void actions.removeRoot(r.path),
       })),
-      { group: "Hub", icon: "ph ph-plugs-connected", label: "Connect an AI agent (Claude Code)", run: onGuide },
+      { group: "Hub", icon: "ph ph-plugs-connected", label: "Connect an AI agent", run: onGuide },
       { group: "Hub", icon: "ph ph-arrow-clockwise", label: "Rescan folders", run: () => void actions.refresh() },
     );
     return list;

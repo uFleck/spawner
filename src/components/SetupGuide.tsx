@@ -1,14 +1,52 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { api, type ClaudeStatus, type LinkStatus, type McpInfo } from "../api";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { api, type AgentKind, type AgentStatus, type LinkStatus, type McpInfo } from "../api";
 
 type StepState = "done" | "busy" | "fail" | "todo";
 
-const INSTALL_CMD = "npm install -g @anthropic-ai/claude-code";
+const AGENTS: AgentKind[] = ["claude", "opencode"];
+const AGENT_INFO: Record<
+  AgentKind,
+  {
+    name: string;
+    command: string;
+    install: string;
+    addNote: string;
+    addCommand: (url: string) => string;
+    rules: string;
+    globalRules: string;
+    linked: string;
+    failing: string;
+  }
+> = {
+  claude: {
+    name: "Claude Code",
+    command: "claude",
+    install: "npm install -g @anthropic-ai/claude-code",
+    addNote: "This adds an MCP server named spawner to your Claude Code user settings, so it works in every project and worktree.",
+    addCommand: (url) => `claude mcp add --transport http --scope user spawner ${url}`,
+    rules: "CLAUDE.md",
+    globalRules: "~/.claude/CLAUDE.md",
+    linked: "Claude Code reached Hub. Restart any open Claude Code session so it loads the new server.",
+    failing: "Claude Code added it but could not connect",
+  },
+  opencode: {
+    name: "OpenCode",
+    command: "opencode",
+    install: "npm install -g @opencode/cli",
+    addNote: "This adds an MCP server named spawner to your OpenCode global config, so it works in every project and worktree.",
+    addCommand: (url) => `opencode mcp add spawner --global --url ${url}`,
+    rules: "AGENTS.md",
+    globalRules: "~/.config/opencode/AGENTS.md",
+    linked: "OpenCode is configured. It watches its config and reloads MCP servers on its own, so no restart is needed.",
+    failing: "OpenCode could not use the entry",
+  },
+};
+
 const PROMPTS = [
   "Use the spawner tools to list my apps, then start the Bill API for this worktree and tell me if it fails to build.",
   "Check the spawner logs for errors since you last looked, and tell me which app they came from.",
 ];
-const CLAUDE_MD = `## Running apps
+const AGENT_MD = `## Running apps
 Run and check apps through the spawner MCP tools (hub_list_apps, hub_start, hub_logs, hub_stop) instead of running dev servers or builds in a terminal. The user watches every process in Spawner.`;
 
 function useClipboard() {
@@ -80,7 +118,8 @@ interface Props {
 }
 
 export function SetupGuide({ open, mcp, onClose, onToast }: Props) {
-  const [claude, setClaude] = useState<ClaudeStatus | null>(null);
+  const [agent, setAgent] = useState<AgentKind>("claude");
+  const [status, setStatus] = useState<AgentStatus | null>(null);
   const [link, setLink] = useState<LinkStatus | null>(null);
   const [checking, setChecking] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -88,18 +127,32 @@ export function SetupGuide({ open, mcp, onClose, onToast }: Props) {
   const [manual, setManual] = useState<number | null>(null);
   const [guidance, setGuidance] = useState<{ busy: boolean; text: string | null; failed: boolean }>({ busy: false, text: null, failed: false });
   const { copied, copy } = useClipboard();
+  const refreshSeq = useRef(0);
+
+  const info = AGENT_INFO[agent];
 
   const refresh = useCallback(async () => {
+    const seq = ++refreshSeq.current;
     setChecking(true);
-    const c = await api.claudeCheck().catch(() => ({ installed: false, version: null }));
-    setClaude(c);
-    setLink(c.installed ? await api.claudeLink().catch((e): LinkStatus => ({ state: "failing", detail: String(e) })) : null);
+    const found = await api.agentCheck(agent).catch((): AgentStatus => ({ installed: false, version: null }));
+    if (seq !== refreshSeq.current) return;
+    setStatus(found);
+    const next = found.installed
+      ? await api.agentLink(agent).catch((e): LinkStatus => ({ state: "failing", detail: String(e) }))
+      : null;
+    if (seq !== refreshSeq.current) return;
+    setLink(next);
     setChecking(false);
-  }, []);
+  }, [agent]);
 
   useEffect(() => {
-    if (open) void refresh();
-  }, [open, refresh]);
+    if (!open) return;
+    setStatus(null);
+    setLink(null);
+    setError(null);
+    setGuidance({ busy: false, text: null, failed: false });
+    void refresh();
+  }, [open, agent, refresh]);
 
   useEffect(() => {
     if (!open) return;
@@ -112,8 +165,8 @@ export function SetupGuide({ open, mcp, onClose, onToast }: Props) {
     setConnecting(true);
     setError(null);
     try {
-      await api.claudeConnect();
-      onToast("Added spawner to Claude Code");
+      await api.agentConnect(agent);
+      onToast(`Added spawner to ${info.name}`);
     } catch (e) {
       setError(String(e));
     }
@@ -124,27 +177,42 @@ export function SetupGuide({ open, mcp, onClose, onToast }: Props) {
   const addGuidance = async () => {
     setGuidance({ busy: true, text: null, failed: false });
     try {
-      setGuidance({ busy: false, text: await api.claudeAddGuidance(CLAUDE_MD), failed: false });
+      setGuidance({ busy: false, text: await api.agentAddGuidance(agent, AGENT_MD), failed: false });
     } catch (e) {
       setGuidance({ busy: false, text: String(e), failed: true });
     }
   };
 
   const url = mcp?.url ?? "";
-  const addCommand = `claude mcp add --transport http --scope user spawner ${url}`;
   const hubState: StepState = mcp?.url ? "done" : mcp?.error ? "fail" : "busy";
-  const claudeState: StepState = !claude ? "busy" : claude.installed ? "done" : "fail";
-  const linkState: StepState = connecting ? "busy" : !claude?.installed ? "todo" : !link || checking ? "busy" : link.state === "connected" ? "done" : link.state === "failing" || link.state === "stale" ? "fail" : "todo";
+  const installedState: StepState = !status ? "busy" : status.installed ? "done" : "fail";
+  const linkedNow = link?.state === "connected" || link?.state === "configured";
+  const linkState: StepState = connecting ? "busy" : !status?.installed ? "todo" : !link || checking ? "busy" : linkedNow ? "done" : link.state === "failing" || link.state === "stale" ? "fail" : "todo";
   const tryState: StepState = linkState === "done" ? "done" : "todo";
-  const states = [hubState, claudeState, linkState];
+  const states = [hubState, installedState, linkState];
   const firstOpen = states.findIndex((s) => s !== "done");
   const current = manual ?? (firstOpen === -1 ? 3 : firstOpen);
   useEffect(() => setManual(null), [firstOpen]);
   const toggle = (i: number) => setManual(current === i ? -1 : i);
 
-  const claudeSummary = !claude ? "checking…" : claude.installed ? (claude.version ?? "installed") : "not found";
+  const installedSummary = !status ? "checking…" : status.installed ? (status.version ?? "installed") : "not found";
   const linkSummary =
-    linkState === "busy" ? (connecting ? "adding…" : "checking…") : link?.state === "connected" ? "connected" : link?.state === "failing" ? "not responding" : link?.state === "stale" ? "outdated URL" : "not added";
+    linkState === "busy"
+      ? connecting
+        ? "adding…"
+        : "checking…"
+      : link?.state === "connected"
+        ? "connected"
+        : link?.state === "configured"
+          ? "configured"
+          : link?.state === "failing"
+            ? agent === "opencode"
+              ? "needs attention"
+              : "not responding"
+            : link?.state === "stale"
+              ? "outdated URL"
+              : "not added";
+  const doneLabel = agent === "claude" ? "Connected" : "Configured";
 
   return (
     <div className={`guide-scrim${open ? " on" : ""}`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -152,12 +220,20 @@ export function SetupGuide({ open, mcp, onClose, onToast }: Props) {
         <header className="guide-h">
           <div>
             <h2>Connect an AI agent</h2>
-            <p>Let Claude Code start, stop and read your apps through Hub, so every process stays visible here.</p>
+            <p>Let Claude Code or OpenCode start, stop and read your apps through Hub, so every process stays visible here.</p>
           </div>
           <button type="button" className="ib" aria-label="Close" data-tip="Close" data-kbd="Esc" onClick={onClose}>
             <i className="ph ph-x" />
           </button>
         </header>
+
+        <div className="guide-pick" role="group" aria-label="Agent">
+          {AGENTS.map((kind) => (
+            <button key={kind} type="button" aria-pressed={agent === kind} onClick={() => setAgent(kind)}>
+              {AGENT_INFO[kind].name}
+            </button>
+          ))}
+        </div>
 
         <ol className="steps">
           <Step n={1} state={hubState} title="Hub is listening" summary={mcp?.url ? new URL(mcp.url).host : mcp?.error ? "not running" : "starting…"} open={current === 0} onToggle={() => toggle(0)}>
@@ -174,15 +250,15 @@ export function SetupGuide({ open, mcp, onClose, onToast }: Props) {
             )}
           </Step>
 
-          <Step n={2} state={claudeState} title="Claude Code is installed" summary={claudeSummary} open={current === 1} onToggle={() => toggle(1)}>
-            {!claude ? (
-              <p>Looking for Claude Code…</p>
-            ) : claude.installed ? (
-              <p>Found Claude Code {claude.version}.</p>
+          <Step n={2} state={installedState} title={`${info.name} is installed`} summary={installedSummary} open={current === 1} onToggle={() => toggle(1)}>
+            {!status ? (
+              <p>Looking for {info.name}…</p>
+            ) : status.installed ? (
+              <p>Found {info.name} {status.version}.</p>
             ) : (
               <>
-                <p>Hub could not find the <code>claude</code> command. Install Claude Code, then check again.</p>
-                <CopyBox id="install" text={INSTALL_CMD} copied={copied} copy={copy} />
+                <p>Hub could not find the <code>{info.command}</code> command. Install {info.name}, then check again.</p>
+                <CopyBox id="install" text={info.install} copied={copied} copy={copy} />
                 <p className="hint">Needs Node.js. If you install it while Hub is open, restart Hub so it sees the new PATH.</p>
                 <button type="button" className="btn btn-ghost" disabled={checking} onClick={() => void refresh()}>
                   <i className={`ph ph-arrow-clockwise${checking ? " spin" : ""}`} />
@@ -192,55 +268,64 @@ export function SetupGuide({ open, mcp, onClose, onToast }: Props) {
             )}
           </Step>
 
-          <Step n={3} state={linkState} title="Add Hub to Claude Code" summary={linkSummary} open={current === 2} onToggle={() => toggle(2)}>
-            <p>
-              This adds an MCP server named <code>spawner</code> to your Claude Code user settings, so it works in every project and worktree.
-            </p>
+          <Step n={3} state={linkState} title={`Add Hub to ${info.name}`} summary={linkSummary} open={current === 2} onToggle={() => toggle(2)}>
+            <p>{info.addNote}</p>
             <div className="actions">
-              <button type="button" className="btn btn-primary" disabled={!mcp?.url || !claude?.installed || connecting} onClick={() => void connect()}>
+              <button type="button" className="btn btn-primary" disabled={!mcp?.url || !status?.installed || connecting} onClick={() => void connect()}>
                 <i className={`ph ${connecting ? "ph-circle-notch spin" : "ph-plugs-connected"}`} />
-                {link?.state === "connected" ? "Add again" : link?.state === "stale" ? "Update Claude Code" : "Add to Claude Code"}
+                {linkedNow ? "Add again" : link?.state === "stale" ? `Update ${info.name}` : `Add to ${info.name}`}
               </button>
-              <button type="button" className="btn btn-ghost" disabled={checking || !claude?.installed} onClick={() => void refresh()}>
+              <button type="button" className="btn btn-ghost" disabled={checking || !status?.installed} onClick={() => void refresh()}>
                 <i className={`ph ph-arrow-clockwise${checking ? " spin" : ""}`} />
                 Check connection
               </button>
             </div>
-            {link?.state === "connected" && <p className="okline"><i className="ph-bold ph-check" /> Claude Code reached Hub. Restart any open Claude Code session so it loads the new server.</p>}
+            {linkedNow && <p className="okline"><i className="ph-bold ph-check" /> {info.linked}</p>}
             {link?.state === "stale" && (
               <p className="err">
-                Claude Code still points at <code>{link.configured}</code>, but Hub is now on <code>{url}</code>. Update it.
+                {info.name} still points at <code>{link.configured}</code>, but Hub is now on <code>{url}</code>. Update it.
               </p>
             )}
-            {link?.state === "failing" && <p className="err">Claude Code added it but could not connect ({link.detail}). Is Hub still open?</p>}
+            {link?.state === "failing" && <p className="err">{info.failing} ({link.detail}).</p>}
             {error && <p className="err">{error}</p>}
             <details>
               <summary>Prefer the terminal?</summary>
-              <CopyBox id="add" text={addCommand} copied={copied} copy={copy} />
+              <CopyBox id="add" text={info.addCommand(url)} copied={copied} copy={copy} />
             </details>
           </Step>
 
           <Step n={4} state={tryState} title="Try it" summary={linkState === "done" ? "ready" : "after step 3"} open={current === 3} onToggle={() => toggle(3)}>
-            <p>Start a new Claude Code session and ask for something like this. Using T3 Code with Claude as the provider? It runs Claude Code, so open a new thread and the tools should be there.</p>
+            <p>Start a new {info.name} session and ask for something like this. Using T3 Code? It runs the agent you pick as the provider, so open a new thread and the tools should be there.</p>
             {PROMPTS.map((p, i) => (
               <CopyBox key={p} id={`p${i}`} text={p} copied={copied} copy={copy} />
             ))}
             <p>
-              To make it the default, add this to your project <code>CLAUDE.md</code> or <code>~/.claude/CLAUDE.md</code>.
+              To make it the default, add this to your project <code>{info.rules}</code> or <code>{info.globalRules}</code>.
             </p>
-            <CopyBox id="md" text={CLAUDE_MD} copied={copied} copy={copy} />
+            <CopyBox id="md" text={AGENT_MD} copied={copied} copy={copy} />
             <div className="actions">
-              <button type="button" className="btn btn-ghost" disabled={!claude?.installed || guidance.busy} onClick={() => void addGuidance()}>
+              <button type="button" className="btn btn-ghost" disabled={!status?.installed || guidance.busy} onClick={() => void addGuidance()}>
                 <i className={`ph ${guidance.busy ? "ph-circle-notch spin" : "ph-sparkle"}`} />
                 {guidance.busy ? "Adding…" : "Add it for me"}
               </button>
-              <span className="hint">Writes the section into your user-level <code>~/.claude/CLAUDE.md</code>, replacing an older copy and leaving the rest untouched.</span>
+              <span className="hint">Writes the section into your user-level <code>{info.globalRules}</code>, replacing an older copy and leaving the rest untouched.</span>
             </div>
             {guidance.text && (guidance.failed ? <p className="err">{guidance.text}</p> : <p className="okline"><i className="ph-bold ph-check" /> {guidance.text}</p>)}
             <details>
               <summary>Using Codex or another agent?</summary>
               <p className="hint">Any client that speaks MCP over HTTP can use the same URL.</p>
-              <CopyBox id="json" text={JSON.stringify({ mcpServers: { "spawner": { type: "http", url } } }, null, 2)} copied={copied} copy={copy} />
+              <CopyBox
+                id="json"
+                text={JSON.stringify(
+                  agent === "opencode"
+                    ? { mcp: { servers: { spawner: { type: "remote", url } } } }
+                    : { mcpServers: { spawner: { type: "http", url } } },
+                  null,
+                  2,
+                )}
+                copied={copied}
+                copy={copy}
+              />
               <CopyBox id="toml" text={`[mcp_servers.spawner]\nurl = "${url}"`} copied={copied} copy={copy} />
             </details>
           </Step>
@@ -249,7 +334,7 @@ export function SetupGuide({ open, mcp, onClose, onToast }: Props) {
         <footer className="guide-f">
           <span className={`pill ${linkState === "done" ? "ok" : ""}`}>
             <i className={linkState === "done" ? "ph-bold ph-check" : "ph ph-circle"} />
-            {linkState === "done" ? "Connected" : "Not connected yet"}
+            {linkState === "done" ? doneLabel : "Not connected yet"}
           </span>
           <button type="button" className="btn btn-primary" onClick={onClose}>
             {linkState === "done" ? "Done" : "Skip for now"}

@@ -384,16 +384,24 @@ export function installMock() {
     },
     start: (a) => void start(a.projectId as string, a.appId as string, a.params as Record<string, string> | null),
     stop: (a) => void stop(a.instanceId as string),
-    claude_check: async () => (await sleep(500), { installed: true, version: "2.1.303 (Claude Code)" }),
-    claude_link: async () => (
-      await sleep(900),
-      connected ? { state: "connected" } : STALE ? { state: "stale", configured: "http://127.0.0.1:38417/mcp" } : { state: "missing" }
+    agent_check: async (a) => (
+      await sleep(500),
+      { installed: true, version: a.kind === "opencode" ? "2.2.7" : "2.1.303 (Claude Code)" }
     ),
-    claude_connect: async () => {
+    agent_link: async (a) => (
+      await sleep(900),
+      a.kind === "opencode"
+        ? connected ? { state: "configured" } : STALE ? { state: "stale", configured: "http://127.0.0.1:38417/mcp" } : { state: "missing" }
+        : connected ? { state: "connected" } : STALE ? { state: "stale", configured: "http://127.0.0.1:38417/mcp" } : { state: "missing" }
+    ),
+    agent_connect: async () => {
       await sleep(1200);
       connected = true;
     },
-    claude_add_guidance: async () => (await sleep(2200), "Added a \"Running apps\" section to ~/.claude/CLAUDE.md."),
+    agent_add_guidance: async (a) => (
+      await sleep(2200),
+      a.kind === "opencode" ? "Added a \"Running apps\" section to ~/.config/opencode/AGENTS.md." : "Added a \"Running apps\" section to ~/.claude/CLAUDE.md."
+    ),
     mcp_info: () => ({ url: `http://127.0.0.1:${STALE ? 38435 : 38417}/mcp`, error: null, portChanged: STALE }),
     open_port: () => undefined,
     load_ui_state: () => null,

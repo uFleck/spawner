@@ -552,6 +552,11 @@ button { font: inherit; color: inherit; }
 .guide-h > div { flex: 1; min-width: 0; }
 .guide-h h2 { margin: 0 0 4px; font: 600 16px/1.25 var(--font-ui); }
 .guide-h p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.45; }
+.guide-pick { display: flex; gap: 2px; padding: 8px 22px; border-bottom: 1px solid var(--border-default); }
+.guide-pick button { padding: 5px 11px; border: 1px solid transparent; border-radius: var(--r); background: transparent; color: var(--text-secondary); font: 500 12px var(--font-ui); cursor: pointer; transition: color 0.25s, background 0.25s, border-color 0.25s; }
+.guide-pick button:hover { color: var(--text-primary); }
+.guide-pick button[aria-pressed="true"] { border-color: var(--border-strong); background: var(--sel-bg); color: var(--sel-fg); }
+.guide-pick button:focus-visible { outline: 0; box-shadow: var(--ring); }
 .steps { flex: 1; min-height: 0; margin: 0; padding: 8px 12px; overflow: auto; list-style: none; }
 .step { border-radius: var(--r); transition: background 0.2s; }
 .step.open { background: var(--hover-tint); }
@@ -611,6 +616,7 @@ button { font: inherit; color: inherit; }
 [data-skin="spawner"] #tip,
 [data-skin="spawner"] .jump,
 [data-skin="spawner"] .empty-act,
+[data-skin="spawner"] .guide-pick button,
 [data-skin="spawner"] .guide-h h2 { font-family: var(--font-pixel); letter-spacing: 0.02em; }
 [data-skin="spawner"] .rail-head h1 { font-size: 15px; text-transform: uppercase; }
 [data-skin="spawner"] .wtg-t b { font-size: 13px; }
@@ -673,7 +679,8 @@ button { font: inherit; color: inherit; }
 [data-skin="spawner"] .status { border-top: 2px solid #3a3a3a; }
 [data-skin="spawner"] .proj { border-left: 2px solid var(--border-strong); }
 [data-skin="spawner"] .roots { border-top: 2px solid var(--border-default); }
-[data-skin="spawner"] .guide-h, [data-skin="spawner"] .guide-f, [data-skin="spawner"] .pal .in { border-color: var(--border-default); border-width: 0 0 2px; }
+[data-skin="spawner"] .guide-h, [data-skin="spawner"] .guide-pick, [data-skin="spawner"] .guide-f, [data-skin="spawner"] .pal .in { border-color: var(--border-default); border-width: 0 0 2px; }
+[data-skin="spawner"] .guide-pick button[aria-pressed="true"] { border-color: var(--bv-l) var(--bv-d) var(--bv-d) var(--bv-l); }
 [data-skin="spawner"] .guide-f { border-width: 2px 0 0; }
 [data-skin="spawner"] ::-webkit-scrollbar-thumb { border: 2px solid var(--bg-surface); background: var(--scroll); }
 [data-skin="spawner"] ::-webkit-scrollbar-thumb:hover { background: var(--scroll-h); }
