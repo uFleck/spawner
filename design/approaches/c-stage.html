@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>C · Stage</title>
+<link rel="icon" href="kit/spawner.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<link rel="stylesheet" href="kit/kit.css">
+<style>
+/* C · Stage: every task is a card on a board, in a lane that says who acts next.
+   Cards move between lanes on their own as apps and agents change. Click a card to zoom into it. */
+.app { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.top { flex: none; display: flex; align-items: center; gap: 8px; height: var(--bar-h); padding: 0 150px 0 14px; background: var(--bg-surface); border-bottom: 1px solid var(--border-default); }
+.top h1 { display: flex; align-items: center; gap: 8px; margin: 0; font: 600 13px/1.2 var(--font-ui); }
+.crumb { display: flex; align-items: center; gap: 6px; min-width: 0; font: 500 13px var(--font-ui); color: var(--text-secondary); }
+.crumb button { border: 0; background: none; padding: 3px 6px; border-radius: var(--r); color: inherit; font: inherit; cursor: pointer; }
+.crumb button:hover { background: var(--hover-tint); color: var(--text-primary); }
+.crumb button:focus-visible { outline: 0; box-shadow: var(--ring); }
+.crumb b { color: var(--text-primary); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crumb .sl { color: var(--text-tertiary); }
+.top .field { width: 240px; }
+.winctl { position: absolute; top: 0; right: 0; z-index: 30; display: flex; height: calc(var(--bar-h) - 1px); }
+.winctl span { display: grid; place-items: center; width: 46px; color: var(--text-secondary); font-size: 14px; }
+
+.stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+
+/* board */
+.board { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; gap: 12px; padding: 12px; overflow: auto; transition: opacity 0.35s, transform 0.45s var(--ease), filter 0.45s; }
+.stage.zoomed .board { opacity: 0; transform: scale(0.97); filter: blur(2px); pointer-events: none; }
+.lane { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.lane-h { display: flex; align-items: baseline; gap: 6px; padding: 2px 4px 0; }
+.lane-h .n { font: 500 10.5px var(--font-mono); color: var(--text-tertiary); }
+.lane-h .hint { margin-left: auto; font: 400 11px var(--font-ui); color: var(--text-tertiary); }
+.lane.needs .lane-h .cap { color: var(--warn); }
+.lane.moving .lane-h .cap { color: var(--agent); }
+.lane-empty { padding: 18px 10px; border: 1px dashed var(--border-default); border-radius: var(--r); color: var(--text-tertiary); font: 400 12px/1.5 var(--font-ui); text-align: center; }
+
+.card { position: relative; display: flex; flex-direction: column; gap: 9px; min-width: 0; padding: 11px 11px 10px; border: 1px solid var(--border-default); border-radius: calc(var(--r) + 2px); background: var(--bg-surface); cursor: pointer; transition: border-color var(--fast), box-shadow 0.25s, transform 0.25s var(--ease); }
+.card:hover { border-color: var(--border-strong); transform: translateY(-1px); box-shadow: 0 6px 18px -10px rgb(0 0 0 / 0.45); }
+.card:focus-visible { outline: 0; box-shadow: var(--ring); }
+.card.s-needs { border-color: color-mix(in srgb, var(--warn) 40%, var(--border-default)); }
+.card.s-needs.bad { border-color: color-mix(in srgb, var(--err) 45%, var(--border-default)); }
+.card.s-agent { border-color: color-mix(in srgb, var(--agent) 40%, var(--border-default)); }
+.card.compact { gap: 6px; }
+.card-h { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 1px 8px; align-items: center; }
+.card-h .g { grid-row: 1 / span 2; align-self: start; display: grid; place-items: center; margin-top: 1px; }
+.card-h b { font: 600 13px/1.3 var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-h span.s { grid-column: 2; font: 400 11px/1.3 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-h .r { grid-row: 1 / span 2; grid-column: 3; align-self: start; }
+.mts { display: flex; flex-direction: column; gap: 2px; }
+.mt { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 0 0 0 6px; border-radius: var(--r); font: 500 12.5px var(--font-ui); }
+.mt:hover { background: var(--hover-tint); }
+.mt .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mt .pt { font: 400 11px var(--font-mono); color: var(--text-secondary); text-decoration: none; }
+.mt .pt:hover { color: var(--accent-text); text-decoration: underline; }
+.mt .pt.bad { color: var(--err); }
+.mt .ib { opacity: 0.55; }
+.mt:hover .ib, .mt .ib:focus-visible { opacity: 1; }
+.spark { display: flex; align-items: flex-end; gap: 8px; height: 26px; }
+.spark svg { flex: 1; height: 22px; min-width: 0; }
+.spark rect { fill: color-mix(in srgb, var(--text-tertiary) 55%, transparent); transition: height 0.4s, y 0.4s; }
+.spark rect.w { fill: var(--warn); }
+.spark rect.e { fill: var(--err); }
+.spark span { flex: none; font: 400 10.5px var(--font-mono); color: var(--text-tertiary); white-space: nowrap; }
+.tail { margin-top: -5px; font: 400 11px/1.4 var(--font-mono); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tail span { margin-right: 8px; color: var(--text-tertiary); }
+.tail.l-err { color: var(--err); } .tail.l-wrn { color: var(--warn); }
+.activity { display: flex; gap: 8px; padding: 7px 8px; border-radius: var(--r); background: var(--hover-tint); font: 400 12px/1.45 var(--font-ui); color: var(--text-secondary); }
+.activity .tx { min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.activity.agent { background: var(--agent-soft); color: var(--text-primary); }
+.activity.warn { background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--text-primary); }
+.activity.bad { background: color-mix(in srgb, var(--err) 10%, transparent); color: var(--text-primary); }
+.activity.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--text-primary); }
+.activity.quiet { background: none; padding: 0 2px; }
+.activity > i { flex: none; margin-top: 2px; }
+.activity code { font: 400 11px var(--font-mono); }
+.card-f { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.card-f .grow { min-width: 0; }
+.card-f .when { font: 400 10.5px var(--font-mono); color: var(--text-tertiary); white-space: nowrap; }
+.card.moved { animation: landed 0.9s var(--ease); }
+@keyframes landed { 0% { box-shadow: 0 0 0 2px var(--accent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+/* zoomed workspace */
+.zoom { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; background: var(--bg-page); transform-origin: 0 0; }
+.zoom[hidden] { display: none; }
+.zoom.flying { pointer-events: none; overflow: hidden; border-radius: 8px; box-shadow: 0 0 0 1px var(--border-strong); }
+.film { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 12px; overflow-x: auto; background: var(--bg-surface); border-bottom: 1px solid var(--border-default); }
+.mini { display: inline-flex; align-items: center; gap: 7px; flex: none; max-width: 240px; height: 30px; padding: 0 10px 0 6px; border: 1px solid var(--border-default); border-radius: var(--r); background: var(--bg-page); color: var(--text-secondary); font: 500 12px var(--font-ui); cursor: pointer; }
+.mini span.t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini:hover { border-color: var(--border-strong); color: var(--text-primary); }
+.mini:focus-visible { outline: 0; box-shadow: var(--ring); }
+.mini.cur { border-color: var(--accent); background: var(--sel-bg); color: var(--sel-fg); }
+.mini .health { display: flex; gap: 3px; }
+.mini .health .dot { width: 6px; height: 6px; }
+.mini.back { padding: 0 10px; }
+.z-h { flex: none; padding: 10px 14px 8px; }
+.z-top { display: flex; align-items: center; gap: 10px; }
+.z-top h2 { margin: 0; min-width: 0; font: 600 16px/1.25 var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.z-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 6px; color: var(--text-tertiary); font: 400 11.5px var(--font-mono); }
+.z-meta .acts { display: flex; gap: 6px; margin-left: auto; }
+.ttab { display: inline-flex; align-items: center; gap: 6px; height: 24px; max-width: 240px; padding: 0 8px 0 5px; border: 1px solid var(--border-default); border-radius: var(--r); background: none; color: var(--text-secondary); font: 500 12px var(--font-ui); cursor: pointer; }
+.ttab span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ttab.cur { border-color: var(--accent); background: var(--sel-bg); color: var(--sel-fg); }
+.ttab:focus-visible { outline: 0; box-shadow: var(--ring); }
+.znext .failcard { margin: 0 14px 10px; }
+.zapps { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; flex: none; padding: 0 14px 10px; }
+.zapps .tile { background: var(--bg-surface); }
+.z-split { display: grid; grid-template-columns: minmax(0, 1fr) 380px; flex: 1; min-height: 0; border-top: 1px solid var(--border-default); }
+.z-split > .logcol { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.z-split > .thcol { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--border-default); background: var(--bg-surface); }
+.thcol-h { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--border-default); flex: none; }
+.thcol-h .t { flex: 1; min-width: 0; font: 600 12.5px var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.empty-th { padding: 16px 14px 8px; color: var(--text-secondary); font: 400 12.5px/1.5 var(--font-ui); }
+.empty-th b { display: block; margin-bottom: 4px; color: var(--text-primary); }
+.mobtabs { display: none; }
+
+/* folds */
+@container app (max-width: 1180px) { .z-split { grid-template-columns: minmax(0, 1fr) 330px; } }
+@container app (max-width: 959px) {
+  .top { padding-right: 140px; }
+  .top .field { display: none; }
+  .board { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 82%; scroll-snap-type: x mandatory; }
+  .lane { scroll-snap-align: start; }
+  .zapps { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+  .z-meta .acts .lbl { display: none; }
+  .mobtabs { display: inline-flex; }
+  .z-split { grid-template-columns: minmax(0, 1fr); }
+  .z-split[data-tab="logs"] > .thcol, .z-split[data-tab="thread"] > .logcol { display: none; }
+  .z-split > .thcol { border-left: 0; }
+}
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="app" id="app">
+    <header class="top">
+      <h1><img class="brand" src="kit/spawner.svg" alt="">Spawner</h1>
+      <span class="sep"></span>
+      <nav class="crumb" id="crumb" aria-label="Where you are"></nav>
+      <span class="grow"></span>
+      <label class="field"><i class="ph ph-funnel"></i><input id="q" placeholder="Filter tasks, apps, branches"></label>
+      <button class="ib" data-k="t3-status" aria-label="T3 Code connection"><i class="ph ph-plugs-connected"></i></button>
+      <button class="ib" data-k="palette" aria-label="Command palette (Ctrl K)"><i class="ph ph-command"></i></button>
+      <button class="ib" data-k="theme" aria-label="Toggle theme"><i class="ph ph-moon"></i></button>
+    </header>
+    <div id="alert"></div>
+    <div class="stage" id="stage">
+      <section class="zoom" id="zoom" hidden aria-label="Task">
+        <div class="film" id="film"></div>
+        <div class="z-h" id="zh"></div>
+        <div class="znext" id="znext"></div>
+        <div class="zapps" id="zapps"></div>
+        <div class="z-split" id="zsplit" data-tab="logs">
+          <section class="logcol" id="zlog"></section>
+          <section class="thcol" id="zth" aria-label="Thread"></section>
+        </div>
+      </section>
+      <div class="board" id="board" aria-label="Board"></div>
+    </div>
+    <div class="status" id="status"></div>
+    <div class="winctl" aria-hidden="true"><span><i class="ph ph-minus"></i></span><span><i class="ph ph-square"></i></span><span><i class="ph ph-x"></i></span></div>
+  </div>
+</div>
+<script src="kit/kit.js"></script>
+<script>
+const { $, $$, esc, S, I, WTS, ui } = K;
+const C = { zoom: null, thread: {}, q: "", tab: "logs", newFor: null, lane: {} };
+const stage = $("#stage"), zoomEl = $("#zoom");
+const narrow = () => $("#app").clientWidth < 960;
+
+const log = new K.LogView($("#zlog"), { scope: () => new Set(C.zoom ? K.wt(C.zoom).ids : []), failCards: false });
+
+/* Who acts next decides the lane. First match wins, same rules as B's rail. */
+const LANES = [["needs", "Needs you", "you act next"], ["moving", "In motion", "an agent or your apps are running"], ["quiet", "Parked", "in review, or idle"]];
+function facts(w) {
+  const th = K.threadsOf(w.id), lead = th[0] || null, st = K.uiStatus(lead);
+  const failed = w.ids.filter((id) => I[id].state === "failed"), running = w.ids.filter((id) => I[id].state === "running");
+  const fix = failed.map((id) => [id, K.fixOf(id)]).find(([, f]) => f) || null;
+  const pr = th.find((t) => t.pr);
+  let lane = "quiet";
+  if (w.main) lane = running.length ? "moving" : "quiet";
+  else if (st === "waiting") lane = "needs";
+  else if (failed.length && !["running", "starting"].includes(st)) lane = "needs";
+  else if (["running", "starting"].includes(st) || running.length) lane = "moving";
+  return { lead, st, failed, running, pr, fix, lane };
+}
+
+/* log volume over the last 6 minutes, 30 buckets of 12 s, plus the newest line */
+function spark(w) {
+  const ids = new Set(w.ids), now = K.now(), B = 30, span = 12000;
+  const b = Array.from({ length: B }, () => ({ n: 0, lv: 0 }));
+  let total = 0, errs = 0;
+  for (const l of S.logs) {
+    if (!ids.has(l.inst)) continue;
+    const k = B - 1 - Math.floor((now - l.ts) / span);
+    if (k < 0 || k >= B) continue;
+    b[k].n++; total++;
+    if (l.level === "err") (b[k].lv = 2), errs++;
+    else if (l.level === "wrn") b[k].lv = Math.max(b[k].lv, 1);
+  }
+  const max = Math.max(4, ...b.map((x) => x.n));
+  const bars = b.map((x, k) => { const h = x.n ? Math.max(2, (x.n / max) * 22) : 1; return `<rect x="${k * 10}" y="${22 - h}" width="7" height="${h}" rx="1" class="${x.lv === 2 ? "e" : x.lv ? "w" : ""}"/>`; }).join("");
+  const last = [...S.logs].reverse().find((l) => ids.has(l.inst) && l.level !== "sys");
+  return `<div class="spark" title="Log lines in the last 6 minutes"><svg viewBox="0 0 300 22" preserveAspectRatio="none">${bars}</svg><span>${total ? `${total} lines${errs ? ` · <b style="color:var(--err);font-weight:500">${errs} err</b>` : ""}` : "no output"}</span></div>${last ? `<div class="tail l-${last.level}" title="${esc(I[last.inst].name)}: ${esc(last.text)}"><span>${K.hms(last.ts).slice(0, 8)}</span>${esc(last.text)}</div>` : ""}`;
+}
+
+function miniTile(id) {
+  const i = I[id], st = i.state, live = K.active(st), port = K.portOf(i);
+  const right = st === "failed" ? `<span class="pt bad">build failed</span>` : port && st === "running" ? `<a class="pt" href="#" data-k="open-port" data-id="${id}">:${port} ↗</a>` : port ? `<span class="pt" style="color:var(--text-tertiary)">:${port}</span>` : "";
+  return `<div class="mt" data-state="${st}"><span class="dot${st === "idle" ? " idle" : ""}"></span><span class="nm">${esc(i.name)}</span>${right}<button class="ib sm${live ? " danger" : ""}" data-k="${live ? "stop" : "start"}" data-id="${id}" aria-label="${live ? "Stop" : st === "failed" ? "Retry" : "Run"} ${esc(i.name)}" ${st === "stopping" ? "disabled" : ""}><i class="ph-fill ${live ? "ph-stop" : st === "failed" ? "ph-arrow-clockwise" : "ph-play"}"></i></button></div>`;
+}
+
+const lastSaid = (th) => [...(th?.messages || [])].reverse().find((m) => m.role === "assistant")?.text.replace(/```[\s\S]*?```/g, "").replace(/`/g, "").trim();
+
+/* the one line that says what is going on, and the button that does the next thing */
+function nextOf(w, f) {
+  const t3 = K.t3For(w.id), usable = t3.ok || t3.kind === "unregistered";
+  const z = `data-a="zoom" data-id="${w.id}"`;
+  if (w.main) return { act: ["quiet", "ph-stack", `${w.projects.length} repo checkouts, each its own T3 project`], btns: `<button class="btn btn-quiet sm" ${z}>Open</button>` };
+  if (t3.kind === "missing" || t3.kind === "down") {
+    const base = f.failed.length ? { act: ["bad", "ph-warning-octagon", `${I[f.failed[0]].name} didn't build · <code>CS0246</code>`] } : { act: ["quiet", "ph-plug", t3.kind === "missing" ? "T3 Code isn't installed · threads unavailable" : f.lead ? `T3 offline · thread as of ${K.hms(S.poll.lastOk || K.now()).slice(0, 5)}` : "T3 offline · threads unknown until it's back"] };
+    base.btns = f.failed.length ? `<button class="btn btn-ghost sm" data-k="fix-copy" data-id="${f.failed[0]}"><i class="ph ph-copy"></i>Copy fix prompt</button><button class="btn btn-quiet sm" data-k="start" data-id="${f.failed[0]}">Retry</button>` : t3.kind === "down" ? `<button class="btn btn-ghost sm" data-k="t3-open" data-wt="${w.id}"><i class="ph ph-arrow-square-out"></i>Open T3 Code</button>` : `<button class="btn btn-ghost sm" data-k="t3-status">What's missing?</button>`;
+    return base;
+  }
+  if (t3.kind === "unregistered") return { act: ["warn", "ph-folder-simple-dashed", `Not a T3 project yet · <code>t3 project add</code>`], btns: `<button class="btn btn-primary sm" data-k="t3-add" data-wt="${w.id}" ${S.adding === w.id ? "disabled" : ""}>${S.adding === w.id ? '<span class="spin"><i class="ph ph-circle-notch"></i></span>Adding…' : '<i class="ph ph-plus"></i>Add to T3'}</button>${f.failed.length ? `<button class="btn btn-quiet sm" data-k="start" data-id="${f.failed[0]}">Retry</button>` : ""}` };
+  if (f.st === "waiting") return { act: ["warn", "ph-hand-palm", `Wants to run <code>${esc(f.lead.ask?.command || "a command")}</code>`], btns: `<button class="btn btn-primary sm" data-k="t3-open" data-wt="${w.id}"><i class="ph ph-arrow-square-out"></i>Approve in T3</button><button class="btn btn-quiet sm" ${z}>View</button>` };
+  if (f.fix) {
+    const [id, fx] = f.fix;
+    if (fx.status === "starting") return { act: ["agent", "ph-sparkle", `Starting a thread in T3… ${K.elapsedSpan(fx.startedAt)}`], btns: "" };
+    if (fx.status === "completed" || fx.status === "settled") return { act: ["ok", "ph-check-circle", esc(lastSaid(fx.th) || "The agent says it's fixed")], btns: `<button class="btn btn-primary sm nudge" data-k="start" data-id="${id}"><i class="ph ph-arrow-clockwise"></i>Retry build</button><button class="btn btn-quiet sm" ${z}>View</button>` };
+    if (fx.status === "error") return { act: ["bad", "ph-x-circle", esc(fx.err)], btns: `<button class="btn btn-agent sm" data-k="fix" data-id="${id}"><i class="ph ph-sparkle"></i>Try again</button>` };
+  }
+  if (f.failed.length && !["running", "starting"].includes(f.st)) return { act: ["bad", "ph-warning-octagon", `${esc(I[f.failed[0]].name)} didn't build · <code>CS0246 'IAsaasGateway'</code>`], btns: usable ? `<button class="btn btn-agent sm" data-k="fix" data-id="${f.failed[0]}"><i class="ph ph-sparkle"></i>Fix with agent</button><button class="btn btn-quiet sm" data-k="start" data-id="${f.failed[0]}">Retry</button>` : "" };
+  if (["running", "starting"].includes(f.st)) return { act: ["agent", "ph-sparkle", esc(lastSaid(f.lead) || "Working…")], btns: `<button class="btn btn-ghost sm" ${z}><i class="ph ph-chat-circle-text"></i>Steer</button>` };
+  if (f.running.length) { const p = f.running.map((id) => I[id]).find((i) => K.portOf(i)); return { act: f.lead ? ["quiet", "ph-chat-circle", `${ui.statusWord(f.st)} · ${esc(f.lead.title)}`] : ["quiet", "ph-check", `${f.running.length} running, no errors in 2 min`], btns: p ? `<button class="btn btn-ghost sm" data-k="open-port" data-id="${p.id}"><i class="ph ph-globe"></i>Open :${K.portOf(p)}</button>` : "" }; }
+  if (f.pr) return { act: ["quiet", "ph-git-pull-request", `#${f.pr.pr.number} ${esc(f.pr.pr.title || "")} · ${f.pr.pr.state}`], btns: `<button class="btn btn-ghost sm" data-k="pr" data-url="${esc(f.pr.pr.url)}"><i class="ph ph-git-pull-request"></i>Open PR</button>` };
+  if (!f.lead && !w.t3made) return { act: ["quiet", "ph-chat-circle-dots", "No thread yet"], btns: `<button class="btn btn-ghost sm" data-a="zoom-new" data-id="${w.id}"><i class="ph ph-sparkle"></i>Start thread</button>` };
+  return { act: ["quiet", "ph-moon", f.lead ? `${ui.statusWord(f.st)} · ${esc(f.lead.title)}` : "Nothing running"], btns: "" };
+}
+
+function card(w) {
+  const f = facts(w), n = nextOf(w, f);
+  const title = f.lead && !w.main ? f.lead.title : w.label;
+  const glyph = f.lead && !w.main ? `<span class="ts ${f.st}${K.t3For(w.id).ok ? "" : " stale"}"></span>` : `<i class="ph ${w.main ? "ph-stack" : "ph-git-branch"} muted" style="font-size:14px"></i>`;
+  const bad = f.failed.length && f.lane === "needs" && f.st !== "waiting";
+  const tiles = w.main ? "" : `<div class="mts">${w.ids.map(miniTile).join("")}</div>`;
+  const [cls, icon, text] = n.act;
+  return `<article class="card s-${f.lane}${bad ? " bad" : ""}${w.main ? " compact" : ""}" data-card="${w.id}" data-a="zoom" data-id="${w.id}" tabindex="0" aria-label="${esc(title)}, ${LANES.find((l) => l[0] === f.lane)[1]}">
+    <div class="card-h"><span class="g">${glyph}</span><b>${esc(title)}</b><span class="s">${w.main ? `${w.ids.length} apps` : `${f.lead ? esc(w.label) + " · " : ""}${esc(w.branch)}`}</span><span class="r">${f.pr ? ui.prChip(f.pr) : ""}</span></div>
+    ${tiles}${w.main ? "" : spark(w)}
+    <div class="activity ${cls}"><i class="ph${cls === "quiet" ? "" : "-fill"} ${icon}"></i><span class="tx">${text}</span></div>
+    ${n.btns || f.lead ? `<div class="card-f">${n.btns}<span class="grow"></span>${f.lead && !w.main ? `<span class="when">${K.agoSpan(f.lead.updatedAt)}</span>` : ""}</div>` : ""}</article>`;
+}
+
+function renderBoard() {
+  const q = C.q.toLowerCase();
+  const list = WTS.filter((w) => !q || (w.label + w.branch + (K.lead(w.id)?.title || "") + w.ids.map((id) => I[id].name).join()).toLowerCase().includes(q));
+  const by = Object.fromEntries(LANES.map(([k]) => [k, []]));
+  list.forEach((w) => by[facts(w).lane].push(w));
+  const board = $("#board");
+  const before = new Map($$("[data-card]", board).map((el) => [el.dataset.card, el.getBoundingClientRect()]));
+  K.put(board, LANES.map(([k, label, hint]) => `<section class="lane ${k}" aria-label="${label}"><div class="lane-h"><span class="cap">${label}</span><span class="n">${by[k].length}</span><span class="hint">${hint}</span></div>${by[k].map(card).join("") || `<div class="lane-empty">${k === "needs" ? "Nothing needs you" : k === "moving" ? "Nothing is running" : "Empty"}</div>`}</section>`).join(""));
+  // FLIP: a card that changed lane glides from where it was
+  for (const el of $$("[data-card]", board)) {
+    const id = el.dataset.card, lane = el.closest(".lane").classList[1], from = before.get(id);
+    if (from && C.lane[id] && C.lane[id] !== lane && !stage.classList.contains("zoomed")) {
+      const to = el.getBoundingClientRect();
+      el.animate([{ transform: `translate(${from.left - to.left}px, ${from.top - to.top}px)` }, { transform: "none" }], { duration: 650, easing: "cubic-bezier(.2,.8,.2,1)" });
+      el.classList.add("moved");
+    }
+    C.lane[id] = lane;
+  }
+}
+
+function tile(id) {
+  const i = I[id], st = i.state, live = K.active(st), port = K.portOf(i);
+  const sub = st === "failed" ? `<span class="bad">${esc(i.exit)}</span>` : `<span>${esc(i.repo)}</span>${port ? `<span>·</span><a href="#" data-k="open-port" data-id="${id}">:${port} ↗</a>` : `<span>· ${esc(i.kind)}</span>`}`;
+  return `<div class="tile" data-state="${st}"><span class="dot${st === "idle" ? " idle" : ""}"></span><div class="meta"><div class="nm">${esc(i.name)}</div><div class="sub">${sub}</div></div><div class="acts">
+    ${live ? `<button class="ib sm" data-k="restart" data-id="${id}" aria-label="Restart ${esc(i.name)}" ${st === "stopping" ? "disabled" : ""}><i class="ph ph-arrow-clockwise"></i></button>` : ""}
+    <button class="ib sm${live ? " danger" : ""}" data-k="${live ? "stop" : "start"}" data-id="${id}" aria-label="${live ? "Stop" : st === "failed" ? "Retry" : "Run"} ${esc(i.name)}" ${st === "stopping" ? "disabled" : ""}><i class="ph-fill ${live ? "ph-stop" : st === "failed" ? "ph-arrow-clockwise" : "ph-play"}"></i></button></div><div class="bar"><i></i></div></div>`;
+}
+
+function renderZoom() {
+  if (!C.zoom) return;
+  const w = K.wt(C.zoom), threads = K.threadsOf(w.id), t3 = K.t3For(w.id);
+  const cur = S.threads[C.thread[w.id]]?.wt === w.id ? C.thread[w.id] : threads[0]?.threadId;
+  const th = cur && S.threads[cur];
+  K.put($("#film"), `<button class="mini back" data-a="board" aria-label="Back to the board (Esc)"><i class="ph ph-squares-four"></i>Board</button>` + WTS.map((x) => { const f = facts(x); return `<button class="mini${x.id === w.id ? " cur" : ""}" data-a="zoom" data-id="${x.id}" title="${esc(x.label)}">${f.lead && !x.main ? `<span class="ts ${f.st}"></span>` : `<i class="ph ${x.main ? "ph-stack" : "ph-git-branch"}"></i>`}<span class="t">${esc(x.main ? "Main" : x.label)}</span><span class="health">${x.ids.slice(0, 5).map((id) => `<span class="dot${I[id].state === "idle" ? " idle" : ""}" data-state="${I[id].state}"></span>`).join("")}</span></button>`; }).join(""));
+  const tabs = narrow() && !w.main ? `<div class="seg mobtabs" role="tablist"><button data-a="tab" data-t="logs" aria-pressed="${C.tab === "logs"}">Logs</button><button data-a="tab" data-t="thread" aria-pressed="${C.tab === "thread"}">Thread${threads.some((t) => K.uiStatus(t) === "waiting") ? ' <span class="ld w"></span>' : ""}</button></div>` : "";
+  K.put($("#zh"), `<div class="z-top">${th ? `<span class="ts ${K.uiStatus(th)}"></span>` : ""}<h2>${esc(w.main ? "Main checkouts" : th ? th.title : w.label)}</h2>${th ? `<span class="pill ${K.uiStatus(th) === "waiting" ? "warn" : "agent"}">${ui.statusWord(K.uiStatus(th))}</span>` : ""}<span class="grow"></span>${tabs}</div>
+    <div class="z-meta"><span><i class="ph ph-git-branch"></i> ${esc(w.main ? "main" : w.label + " · " + w.branch)}</span><span><i class="ph ph-folders"></i> ${w.projects.map((p) => esc(p.repo)).join(", ")}</span>${threads.length > 1 ? threads.map((t) => `<button class="ttab${t.threadId === cur ? " cur" : ""}" data-a="thread" data-id="${t.threadId}" title="${esc(t.title)}"><span class="ts ${K.uiStatus(t)}"></span><span>${esc(t.title)}</span></button>`).join("") : ""}
+      <span class="acts">${th?.pr ? ui.prChip(th) : ""}${w.t3project ? `<button class="btn btn-ghost sm" data-k="t3-open" data-wt="${w.id}" title="t3 app ${esc(w.t3project)}"><i class="ph ph-arrow-square-out"></i><span class="lbl">Open in T3</span></button>` : ""}</span></div>`);
+  K.put($("#znext"), w.ids.map((id) => ui.failCard(id)).join(""));
+  K.put($("#zapps"), w.ids.map(tile).join(""));
+  $("#zsplit").dataset.tab = w.main ? "logs" : C.tab;
+  $("#zsplit").style.gridTemplateColumns = w.main ? "minmax(0,1fr)" : "";
+  $("#zth").hidden = !!w.main;
+  if (w.main) return;
+  const problem = ui.t3Problem(w.id);
+  const showNew = C.newFor === w.id || !threads.length;
+  K.put($("#zth"), `<div class="thcol-h"><span class="t">${showNew && threads.length ? "New thread" : th ? "Conversation" : "Thread"}</span>${threads.length && t3.ok && !w.t3made ? `<button class="btn btn-quiet sm" data-a="new" aria-pressed="${showNew}"><i class="ph ph-plus"></i>New</button>` : ""}${th ? `<button class="ib sm" data-k="link" data-url="${esc(th.link)}" aria-label="Open thread in the web app"><i class="ph ph-arrow-square-out"></i></button>` : ""}</div>${problem}`
+    + (showNew ? `${threads.length ? "" : `<div class="empty-th"><b>No thread for ${esc(w.label)} yet</b>A thread started here runs in <code>${esc(w.t3project)}</code>, where Spawner runs these apps. It does not make another worktree.</div>`}<div style="flex:1"></div>${ui.newThread(w.id)}` : ui.conversation(cur)));
+}
+
+function renderCrumb() {
+  const w = C.zoom && K.wt(C.zoom);
+  const counts = LANES.map(([k]) => WTS.filter((x) => facts(x).lane === k).length);
+  K.put($("#crumb"), w ? `<button data-a="board"><i class="ph ph-squares-four"></i> Board</button><span class="sl">/</span><b>${esc(w.label)}</b>` : `<b>Board</b><span class="sl">·</span><span>${counts[0] ? `<span style="color:var(--warn)">${counts[0]} need you</span> · ` : ""}${counts[1]} in motion · ${counts[2]} parked</span>`);
+}
+
+function render() {
+  renderCrumb();
+  renderBoard();
+  renderZoom();
+  K.put($("#status"), ui.statusBar());
+  K.put($("#alert"), ui.alertBar());
+}
+K.on("render", render);
+
+/* zoom: the workspace grows out of the card that was clicked, and shrinks back into it */
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+function fly(rect, into) {
+  if (reduce || !rect) return;
+  const s = stage.getBoundingClientRect();
+  const sx = rect.width / s.width, sy = rect.height / s.height, dx = rect.left - s.left, dy = rect.top - s.top;
+  const a = [{ transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, opacity: 0.4 }, { transform: "none", opacity: 1 }];
+  zoomEl.classList.add("flying");
+  return zoomEl.animate(into ? a : a.reverse(), { duration: into ? 420 : 340, easing: "cubic-bezier(.2,.8,.2,1)" }).finished.finally(() => zoomEl.classList.remove("flying"));
+}
+function zoomTo(id, { thread = null } = {}) {
+  const was = C.zoom;
+  C.zoom = id;
+  C.newFor = null;
+  if (thread) C.thread[id] = thread;
+  log.hidden = new Set();
+  render();
+  log.update();
+  if (was) return;
+  const rect = $(`[data-card="${CSS.escape(id)}"]`)?.getBoundingClientRect();
+  zoomEl.hidden = false;
+  stage.classList.add("zoomed");
+  fly(rect, true);
+}
+async function toBoard() {
+  if (!C.zoom) return;
+  const id = C.zoom;
+  C.zoom = null;
+  stage.classList.remove("zoomed");
+  render();
+  const rect = $(`[data-card="${CSS.escape(id)}"]`)?.getBoundingClientRect();
+  await fly(rect, false);
+  if (!C.zoom) zoomEl.hidden = true;
+  $(`[data-card="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
+}
+function focusThread(id) {
+  const th = S.threads[id];
+  if (!th) return;
+  C.tab = "thread";
+  zoomTo(th.wt, { thread: id });
+}
+K.on("focus-thread", focusThread);
+K.on("thread-started", ({ id }) => focusThread(id));
+K.on("resize", render);
+
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-a]");
+  if (!b || e.target.closest("[data-k]") || (e.target.closest("a") && b.dataset.a === "zoom")) return;
+  const d = b.dataset;
+  if (d.a === "zoom") return zoomTo(d.id);
+  if (d.a === "zoom-new") { zoomTo(d.id); C.newFor = d.id; render(); return setTimeout(() => $(`[data-newthread="${d.id}"]`)?.focus(), 450); }
+  if (d.a === "board") return toBoard();
+  if (d.a === "thread") { C.newFor = null; return focusThread(d.id); }
+  if (d.a === "new") { C.newFor = C.newFor === C.zoom ? null : C.zoom; render(); return setTimeout(() => $(`[data-newthread="${C.zoom}"]`)?.focus(), 30); }
+  if (d.a === "tab") { C.tab = d.t; return render(); }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && C.zoom && !K.dlg.el && !$("#pal.on") && !/INPUT|TEXTAREA/.test(e.target.tagName)) return toBoard();
+  if (e.key === "Enter" && e.target.matches?.("[data-card]")) return zoomTo(e.target.dataset.card);
+  if (e.altKey && /^[1-9]$/.test(e.key)) { const c = $$("[data-card]")[+e.key - 1]; if (c) zoomTo(c.dataset.card); }
+});
+$("#q").oninput = (e) => ((C.q = e.target.value), render());
+K.palette.extra = () => [
+  ...WTS.map((w) => ({ g: "Go to", icon: "ph-git-branch", label: `${K.lead(w.id) && !w.main ? K.lead(w.id).title + " · " : ""}${w.label}`, run: () => zoomTo(w.id) })),
+  { g: "Go to", icon: "ph-squares-four", label: "Board", run: toBoard },
+];
+render();
+K.boot({
+  focusWt: (id) => zoomTo(id),
+  focusThread,
+  selectRefund: () => { C.tab = "logs"; render(); log.selectWhere((l) => l.inst === K.ID.api && (/rf_8851/.test(l.text) || l.text.startsWith("   at Cadence"))); },
+  morning: () => location.replace(location.pathname),
+  day: () => { zoomTo("docs-search"); K.app.start(K.ID.docs); },
+});
+</script>
+</body>
+</html>

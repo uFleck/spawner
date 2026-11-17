@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spawner × T3 Code</title>
+<link rel="icon" href="kit/spawner.svg">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root { --bg: #ffffff; --surface: #f4f6fa; --border: #e3e7ee; --t1: #12151c; --t2: #485063; --t3: #8790a2; --accent: #1f8a5b; --accent-text: #16714a; --ok: #0e9f7a; --warn: #b7791f; --err: #e0412b; --agent: #7c4ddb; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root { --bg: #0d0e11; --surface: #121317; --border: #23252c; --t1: #e8eaee; --t2: #9aa1b2; --t3: #697082; --accent: #3ecf8e; --accent-text: #5fdba5; --ok: #3dd68c; --warn: #f0b23c; --err: #ff5c5c; --agent: #b18cff; color-scheme: dark; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--t1); font: 400 14.5px/1.6 Inter, system-ui, sans-serif; }
+main { max-width: 1120px; margin: 0 auto; padding: 40px 16px 80px; }
+h1 { margin: 0; font: 700 26px/1.25 Inter, sans-serif; letter-spacing: -0.01em; }
+h2 { margin: 56px 0 6px; font: 600 19px/1.3 Inter, sans-serif; }
+h3 { margin: 0 0 4px; font: 600 16px/1.3 Inter, sans-serif; }
+p { margin: 8px 0; color: var(--t2); max-width: 74ch; }
+b, strong { color: var(--t1); font-weight: 600; }
+code, .mono { font: 400 12.5px JetBrains Mono, monospace; }
+a { color: var(--accent-text); }
+.sub { margin-top: 6px; color: var(--t3); font: 400 12.5px JetBrains Mono, monospace; }
+.lede { font-size: 15.5px; color: var(--t2); }
+.cap { font: 600 11px/1 JetBrains Mono, monospace; letter-spacing: 0.06em; text-transform: uppercase; color: var(--t3); }
+.approach { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 24px; margin-top: 18px; padding-top: 22px; border-top: 1px solid var(--border); }
+.approach .shot { display: block; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.approach .shot img { display: block; width: 100%; height: auto; }
+.approach .shot:hover { border-color: var(--accent); }
+.approach .shot:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tag { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 10px; font: 500 11px JetBrains Mono, monospace; vertical-align: 2px; }
+.tag.safe { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.tag.aligned { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.tag.heavy { color: var(--agent); background: color-mix(in srgb, var(--agent) 14%, transparent); }
+ul { margin: 8px 0; padding-left: 18px; color: var(--t2); }
+li { margin: 3px 0; }
+li::marker { color: var(--t3); }
+.open { display: inline-block; margin-top: 10px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 4px; color: var(--t1); text-decoration: none; font-weight: 500; }
+.open:hover { border-color: var(--accent); }
+.thumbs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.thumbs a { display: block; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; text-decoration: none; color: var(--t3); font: 400 11px JetBrains Mono, monospace; }
+.thumbs img { display: block; width: 100%; height: auto; }
+.thumbs span { display: block; padding: 3px 6px; }
+.scroll { overflow-x: auto; margin-top: 12px; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+th { font: 600 11px JetBrains Mono, monospace; letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+td:first-child { color: var(--t1); font-weight: 500; }
+td { color: var(--t2); }
+td .n { font: 600 13px JetBrains Mono, monospace; color: var(--t1); }
+.good { color: var(--ok) !important; } .mid { color: var(--warn) !important; } .bad { color: var(--err) !important; }
+.reco { margin-top: 14px; padding: 4px 0 4px 18px; border-left: 3px solid var(--accent); }
+.legend { margin-top: 8px; color: var(--t3); font-size: 12.5px; }
+.legend span { margin-right: 14px; }
+.foot { margin-top: 48px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--t3); font-size: 12.5px; }
+.foot p { color: var(--t3); }
+.base { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.base img { width: 100%; border: 1px solid var(--border); border-radius: 4px; display: block; }
+@media (max-width: 820px) { .approach { grid-template-columns: minmax(0, 1fr); } .base { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+<main>
+  <span class="cap">Design review · 17 Nov 2026 · revised</span>
+  <h1>Spawner × T3 Code: revised direction (B2)</h1>
+  <div class="sub">b2-review.html · kit/review.js · notes-b2.md · checked over http in headless Chromium, 1280 × 800 and 720 × 560, dark and light</div>
+  <section class="approach">
+    <div>
+      <a class="shot" href="b2-review.html"><img src="shots/b2-dark.png" alt="B2 review cockpit, dark, 1280 by 800"></a>
+      <div class="thumbs">
+        <a href="b2-review.html#s=conflict"><img src="shots/b2-conflict.png" alt=""><span>port conflict</span></a>
+        <a href="b2-review.html#s=nostack"><img src="shots/b2-nostack.png" alt=""><span>no stack yet</span></a>
+        <a href="b2-review.html#s=narrow"><img src="shots/b2-720.png" alt=""><span>720 × 560</span></a>
+      </div>
+    </div>
+    <div>
+      <h3>B2 · Review-first worktree cockpit <span class="tag aligned">recommended</span></h3>
+      <p>The rail starts with <b>In review</b>: every worktree that has an open PR, with its review and checks state and a <b>Run stack</b> button. To test a PR, you click Run stack on its row. The workspace shows that worktree's <b>stack</b> (apps, ports, run/stop) above its scoped logs.</p>
+      <ul>
+        <li>Each repo commits its stack in <code>spawner.stack.json</code>, so a new feature worktree has a stack ready as soon as it exists.</li>
+        <li>Ports are repo defaults plus per-worktree overrides. You edit them inline, and agents set them with <code>hub_set_port</code>.</li>
+        <li>PRs come from <code>gh</code>. T3 is used for one thing: an optional link to the thread. Spawner makes one call per repo every 60 s and registers nothing.</li>
+      </ul>
+      <p><b>Rejected:</b> chat in Spawner (no transcript, composer or conversation pane), the kanban board (C), registering each worktree as a T3 project, and the "Needs you" and agent-status queue.</p>
+      <a class="open" href="b2-review.html">Open B2 →</a> <a class="open" href="notes-b2.md">Implementation notes</a>
+    </div>
+  </section>
+
+  <h2 style="margin-top:64px">Earlier explorations (superseded)</h2>
+  <p>The first round is kept below for reference. A and C are no longer recommended. B was the base for B2: B2 keeps B's worktree rail and scoped logs and drops the thread column, the composer, Fix with agent and the "Needs you" section.</p>
+  <span class="cap" style="display:block;margin-top:24px">Round 1</span>
+  <h1 style="font-size:20px">Spawner × T3 Code: three ways to show the work</h1>
+  <div class="sub">main @ c6ee5b4 · mockups in design/approaches · one shared simulated backend and `t3` CLI (kit/kit.js) · 1280 × 800</div>
+  <p class="lede">Spawner shows apps and their output, but the work is a task: a worktree, a few repos, an agent thread in T3 Code and a PR. Each mockup below adds T3 Code to Spawner in a different way. All three use the same data and the same simulated T3, so you can compare them: three worktrees, one build failure, one thread running, one PR in review. T3 can be switched to missing, down, slow or unregistered.</p>
+  <p>Open a mockup and press <b>DEMO</b> (bottom left) or the <code>`</code> key to jump between scenarios: morning, failure → fix, waiting for you, send log lines, day-to-day, the four degraded T3 states, the light theme and the 720 × 560 fold. Deep links also work: <code>#fix</code>, <code>#waiting</code>, <code>#send</code>, <code>#mode=down</code>, <code>#narrow</code>, <code>#theme=light</code>.</p>
+
+  <h2>Today</h2>
+  <p>The sidebar shows worktree → projects → apps, next to one merged log. Spawner knows nothing about T3. The only way to recover a failed app is Retry, and the only way to hand logs to an agent is copy and paste.</p>
+  <div class="base"><img src="shots/current-dark.png" alt="Current Spawner UI, dark"><img src="shots/current-light.png" alt="Current Spawner UI, light"></div>
+
+  <h2>The three approaches</h2>
+
+  <section class="approach">
+    <div>
+      <a class="shot" href="a-cockpit.html"><img src="shots/a-cockpit-dark.png" alt="A Cockpit, dark, 1280 by 800"></a>
+      <div class="thumbs">
+        <a href="a-cockpit.html#waiting"><img src="shots/a-cockpit-waiting.png" alt=""><span>waiting for you</span></a>
+        <a href="a-cockpit.html#narrow"><img src="shots/a-cockpit-720.png" alt=""><span>720 × 560</span></a>
+      </div>
+    </div>
+    <div>
+      <h3>A · Cockpit <span class="tag safe">safest</span></h3>
+      <p><b>Optimizes for:</b> keeping today's muscle memory. The tree and the merged log stay. A <b>Work</b> panel on the right shows the selected worktree's threads, the conversation and a composer. Fail cards in the log get <b>Fix with agent</b>.</p>
+      <ul>
+        <li>Each worktree in the tree has a thread line: "waiting for you · Fix CS0246…", plus the PR chip.</li>
+        <li>Nothing moves, so it is the easiest to ship and to undo.</li>
+        <li>You still scan the tree to find what needs you. The task is split across two places: the tree (apps) and the panel (agent).</li>
+        <li>At 720 px both side columns turn into drawers over the log.</li>
+      </ul>
+      <a class="open" href="a-cockpit.html">Open A →</a>
+    </div>
+  </section>
+
+  <section class="approach">
+    <div>
+      <a class="shot" href="b-mission-control.html"><img src="shots/b-mission-control-dark.png" alt="B Mission control, dark, 1280 by 800"></a>
+      <div class="thumbs">
+        <a href="b-mission-control.html#theme=light"><img src="shots/b-mission-control-light.png" alt=""><span>light</span></a>
+        <a href="b-mission-control.html#waiting"><img src="shots/b-mission-control-waiting.png" alt=""><span>waiting for you</span></a>
+        <a href="b-mission-control.html#narrow"><img src="shots/b-mission-control-720.png" alt=""><span>720 × 560</span></a>
+      </div>
+    </div>
+    <div>
+      <h3>B · Mission control <span class="tag aligned">fits the workflow best</span></h3>
+      <p><b>Optimizes for:</b> answering "what do I do next?" The rail lists <b>tasks</b> (a worktree and its thread), sorted by who has to act: Needs you, Agent working, Apps running, In review, Quiet. Each row has app health dots, a PR chip and a one-line reason. Selecting a task opens its workspace: app tiles, fail cards, logs for that worktree only, and the conversation.</p>
+      <ul>
+        <li>The top of the rail is always the next thing to do. Rows move between sections as builds fail and agents finish.</li>
+        <li>Logs are already filtered to the task, so picking lines to send to the agent is quick.</li>
+        <li><b>All apps &amp; logs</b> keeps today's merged view for anyone who wants it.</li>
+        <li>Costs: the sidebar is replaced. Presets, pins and batch mark have to move to the palette or the All page.</li>
+      </ul>
+      <a class="open" href="b-mission-control.html">Open B →</a>
+    </div>
+  </section>
+
+  <section class="approach">
+    <div>
+      <a class="shot" href="c-stage.html"><img src="shots/c-stage-dark.png" alt="C Stage, dark, 1280 by 800"></a>
+      <div class="thumbs">
+        <a href="c-stage.html#waiting"><img src="shots/c-stage-waiting.png" alt=""><span>zoomed · waiting</span></a>
+        <a href="c-stage.html#mode=down"><img src="shots/c-stage-t3-down.png" alt=""><span>T3 offline</span></a>
+      </div>
+    </div>
+    <div>
+      <h3>C · Stage <span class="tag heavy">most interactive</span></h3>
+      <p><b>Optimizes for:</b> seeing everything at once. Each task is a card in a lane (Needs you, In motion, Parked). A card shows its apps with Run/Stop, a 6-minute log sparkline, the newest log line, the agent's last message and one button for the next step. Cards slide to a new lane by themselves when things change. Clicking a card zooms into a workspace with a filmstrip of the other tasks.</p>
+      <ul>
+        <li>Most things take one click from the board: Fix with agent, Approve in T3, Retry build, Open :5050, Open PR.</li>
+        <li>With 3–5 tasks the board is mostly empty space. At 720 px the lanes become a carousel.</li>
+        <li>The zoomed view is B's workspace, so C is B plus a board. It also needs <code>thread show</code> for every lead thread, which means more polling.</li>
+        <li>The mockup has no merged "all logs" view.</li>
+      </ul>
+      <a class="open" href="c-stage.html">Open C →</a>
+    </div>
+  </section>
+
+  <h2>Actions per task</h2>
+  <p>Clicks starting with no task selected, counted in the mockups. "Today" is estimated from the current app plus T3 Code.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Task</th><th>Today</th><th>A · Cockpit</th><th>B · Mission control</th><th>C · Stage</th></tr></thead>
+    <tbody>
+      <tr><td>See what needs you</td><td class="bad">scan the tree; agent state isn't shown</td><td class="mid">scan the tree (chips + thread lines)</td><td class="good"><span class="n">0</span> · top of the rail</td><td class="good"><span class="n">0</span> · first lane</td></tr>
+      <tr><td>Failed build → an agent is on it</td><td class="bad">~7 + switch app (select, copy, T3, project, new thread, paste, send)</td><td class="good"><span class="n">2</span> · Fix with agent, Start thread</td><td><span class="n">3</span> · task, Fix, Start</td><td class="good"><span class="n">2</span> · Fix on the card, Start</td></tr>
+      <tr><td>Agent waiting for permission</td><td class="bad">only visible in T3</td><td><span class="n">1</span> + approve in T3 (toast, badge)</td><td><span class="n">1</span> + approve in T3 (Needs you row)</td><td><span class="n">1</span> + approve in T3 (card button)</td></tr>
+      <tr><td>Agent finished → retry the build</td><td class="mid">notice it in T3, come back, Retry</td><td class="good"><span class="n">1</span></td><td class="good"><span class="n">1</span> (2 from another task)</td><td class="good"><span class="n">1</span> from the card</td></tr>
+      <tr><td>Send log lines to a thread</td><td class="bad">~6 + switch app</td><td><span class="n">4</span> · click, shift-click, Send to thread, Send</td><td><span class="n">4</span> · logs already scoped to the task</td><td class="mid"><span class="n">5</span> · zoom first</td></tr>
+      <tr><td>Switch to another task's thread</td><td class="mid">in T3</td><td class="good"><span class="n">1</span></td><td class="good"><span class="n">1</span> (Alt+1…9)</td><td class="good"><span class="n">1</span> (board or filmstrip)</td></tr>
+      <tr><td>Start / stop an app, open its port</td><td class="good"><span class="n">1</span></td><td class="good"><span class="n">1</span></td><td><span class="n">1</span> (2 from another task)</td><td class="good"><span class="n">1</span> from the card</td></tr>
+      <tr><td>Open the task's PR</td><td class="bad">GitHub</td><td class="good"><span class="n">1</span> · chip in the tree</td><td><span class="n">2</span> · task, chip</td><td class="good"><span class="n">1</span> · card button</td></tr>
+      <tr><td>Read every app's log merged</td><td class="good"><span class="n">0</span></td><td class="good"><span class="n">0</span></td><td><span class="n">1</span> · All apps &amp; logs</td><td class="bad">not in the mockup</td></tr>
+      <tr><td>T3 offline → recover</td><td>n/a</td><td><span class="n">1</span> · Open T3 Code</td><td><span class="n">1</span></td><td><span class="n">1</span></td></tr>
+    </tbody>
+  </table></div>
+  <div class="legend"><span class="good">● best of the row</span><span class="mid">● workable</span><span class="bad">● slow or missing</span></div>
+
+  <h2>Tradeoffs</h2>
+  <div class="scroll"><table>
+    <thead><tr><th></th><th>A · Cockpit</th><th>B · Mission control</th><th>C · Stage</th></tr></thead>
+    <tbody>
+      <tr><td>Fits task-based work</td><td class="mid">partly: apps and agent sit side by side</td><td class="good">the task is the unit</td><td class="good">the task is the unit</td></tr>
+      <tr><td>Change for current users</td><td class="good">small</td><td class="mid">new navigation; All page keeps the old view</td><td class="bad">new home screen and zoom model</td></tr>
+      <tr><td>Front-end effort</td><td class="good">panel + fail-card states + 2 dialogs</td><td class="mid">new rail, scoped LogPane, move presets/batch</td><td class="bad">B + board, animation, sparklines</td></tr>
+      <tr><td>T3 polling load</td><td class="good">list per project; show for the open thread</td><td class="good">same as A</td><td class="mid">show for every lead thread</td></tr>
+      <tr><td>Without T3</td><td class="good">today's app plus one status line</td><td class="good">rail still sorts by failed and running apps</td><td class="mid">cards lose their activity line</td></tr>
+      <tr><td>At 720 × 560</td><td class="mid">two drawers over the log</td><td class="good">one drawer + Logs/Thread tabs</td><td class="mid">lane carousel; zoom uses tabs</td></tr>
+      <tr><td>Fits the companion window</td><td class="mid">no change</td><td class="good">a task row is a ready-made companion line</td><td class="good">a card is a ready-made companion tile</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>Round 1 recommendation (superseded by B2)</h2>
+  <div class="reco" style="opacity:.7">
+    <p><b>Make B the target layout, but ship the T3 integration first in the layout we have today.</b> Spawner already tracks the things that decide what's next (failed builds, running apps), and T3 adds the rest (waiting for you, agent finished, PR in review). B is the only layout that sorts by all of it, so the next action is always at the top of the rail without scanning. It keeps the log as the main surface, and "All apps &amp; logs" keeps the merged view.</p>
+    <p>A is a good first step, not the end state. Its work (T3 detection, Fix with agent on fail cards, Send to thread, thread lines in the tree) is the same code B needs, so slices 1–4 in <a href="notes.md">notes.md</a> ship into today's sidebar and carry over unchanged. Swapping the sidebar for the task rail is the last step, after presets and batch mark have a new home.</p>
+    <p>C's zoomed view is the same as B's workspace, and its board adds animation and more polling. With the usual 3–5 tasks, B's rail already gives the same overview. The C card works better in the companion window, as one tile per task at the screen edge, than as the main screen.</p>
+  </div>
+
+  <div class="foot">
+    <p><b>How it was checked.</b> All three mockups were run in headless Chromium at 1280 × 800, dark and light, with no console errors. The full fix flow was run in all three: failed → Fix with agent → waiting → approved → completed → Retry build → running. In C the card also changed lanes by itself. Screenshots are from those runs.</p>
+    <p><b>Not covered.</b> T3 latency, timeouts and output shapes are simulated from the CLI contract in the brief; none of this has run against the real <code>t3</code>. The cost of each <code>t3</code> process on Windows has not been measured. The companion window and tray are not mocked. The baseline screenshots come from the dev mock backend, not real repos.</p>
+  </div>
+</main>
+</body>
+</html>

@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B · Mission control</title>
+<link rel="icon" href="kit/spawner.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<link rel="stylesheet" href="kit/kit.css">
+<style>
+/* B · Mission control: the rail lists tasks (a worktree and its thread), sorted by what needs you.
+   The main area is one task: its apps, its logs, its conversation. */
+.app { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: 100%; }
+.rail { display: flex; flex-direction: column; min-height: 0; min-width: 0; padding: var(--pad) var(--pad) 0; background: var(--bg-surface); border-right: 1px solid var(--border-default); }
+.rail-head { display: flex; align-items: center; gap: 4px; padding: 2px 2px 8px 6px; }
+.rail-head h1 { display: flex; align-items: center; gap: 8px; flex: 1; margin: 0; font: 600 13px/1.2 var(--font-ui); }
+.rail .field { margin-bottom: 6px; }
+.tasks { flex: 1; overflow: auto; min-height: 0; margin: 0 -5px; padding: 0 5px 10px; }
+.sec { margin-top: 8px; }
+.sec-h { display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 6px; }
+.sec-h .n { font: 500 10.5px var(--font-mono); color: var(--text-tertiary); }
+.sec.needs .sec-h .cap { color: var(--warn); }
+.task { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; width: 100%; padding: 7px 8px 7px 6px; border: 0; border-radius: var(--r); background: none; text-align: left; cursor: pointer; transition: background var(--fast), box-shadow 0.25s; animation: enter 0.4s var(--ease) backwards; }
+.task:hover { background: var(--hover-tint); }
+.task:focus-visible { outline: 0; box-shadow: var(--ring); }
+.task.cur { background: var(--sel-bg); box-shadow: inset 2px 0 0 var(--accent); }
+.task .g { grid-row: 1 / span 2; align-self: start; margin-top: 1px; display: grid; place-items: center; }
+.task .t { font: 600 13px/1.3 var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task .s { grid-column: 2; font: 400 11px/1.3 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task .r { grid-row: 1 / span 2; grid-column: 3; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.task .why { grid-column: 2 / span 2; font: 500 11.5px/1.3 var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task .why.bad { color: var(--err); } .task .why.warn { color: var(--warn); } .task .why.ok { color: var(--ok); } .task .why.agent { color: var(--agent); }
+.health { display: flex; gap: 4px; }
+.health .dot { width: 7px; height: 7px; }
+.foot { flex: none; margin: 0 -10px; padding: 6px 10px; border-top: 1px solid var(--border-default); }
+.navrow { display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 8px; border: 0; border-radius: var(--r); background: none; color: var(--text-secondary); font: 500 13px var(--font-ui); cursor: pointer; text-align: left; }
+.navrow:hover { background: var(--hover-tint); color: var(--text-primary); }
+.navrow:focus-visible { outline: 0; box-shadow: var(--ring); }
+.navrow.cur { background: var(--sel-bg); color: var(--sel-fg); }
+.navrow i { font-size: 16px; color: var(--text-tertiary); }
+
+/* workspace */
+.ws { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ws-h { flex: none; padding: 0 12px 0 16px; background: var(--bg-surface); border-bottom: 1px solid var(--border-default); }
+.ws-top { display: flex; align-items: center; gap: 10px; height: var(--bar-h); padding-right: 138px; }
+.ws-top h2 { margin: 0; min-width: 0; font: 600 15px/1.2 var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-bottom: 10px; color: var(--text-tertiary); font: 400 11.5px var(--font-mono); }
+.ws-meta .acts { display: flex; gap: 6px; margin-left: auto; }
+.ttabs { display: flex; gap: 4px; }
+.ttab { display: inline-flex; align-items: center; gap: 6px; height: 24px; max-width: 240px; padding: 0 8px 0 5px; border: 1px solid var(--border-default); border-radius: var(--r); background: none; color: var(--text-secondary); font: 500 12px var(--font-ui); cursor: pointer; }
+.ttab span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ttab:hover { border-color: var(--border-strong); color: var(--text-primary); }
+.ttab.cur { border-color: var(--accent); background: var(--sel-bg); color: var(--sel-fg); }
+.ttab:focus-visible { outline: 0; box-shadow: var(--ring); }
+.strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; flex: none; padding: 10px 12px; border-bottom: 1px solid var(--border-default); }
+.strip .tile { background: var(--bg-page); }
+.strip-h { display: flex; align-items: center; gap: 8px; padding: 0 0 0 2px; grid-column: 1 / -1; }
+.next { flex: none; }
+.next .failcard { margin: 10px 12px 0; }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 380px; flex: 1; min-height: 0; }
+.split > .logcol { display: flex; flex-direction: column; min-width: 0; min-height: 0; margin-top: 10px; border-top: 1px solid var(--border-default); }
+.split > .thcol { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--border-default); background: var(--bg-surface); margin-top: 10px; border-top: 1px solid var(--border-default); }
+.thcol-h { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--border-default); flex: none; }
+.thcol-h .t { flex: 1; min-width: 0; font: 600 12.5px var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.thcol .logv-bar { height: 36px; }
+.empty-th { padding: 16px 14px 8px; color: var(--text-secondary); font: 400 12.5px/1.5 var(--font-ui); }
+.empty-th b { display: block; margin-bottom: 4px; color: var(--text-primary); }
+.mobtabs { display: none; }
+.winctl { position: absolute; top: 0; right: 0; z-index: 30; display: flex; height: calc(var(--bar-h) - 1px); }
+.winctl span { display: grid; place-items: center; width: 46px; color: var(--text-secondary); font-size: 14px; }
+.scrim { position: absolute; inset: 0; z-index: 40; background: color-mix(in srgb, var(--bg-page) 60%, transparent); opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+.allapps { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border-default); max-height: 34%; overflow: auto; flex: none; }
+.allapps .grp { display: grid; grid-template-columns: 120px repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; align-items: center; }
+.allapps .grp > b { font: 600 12px var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-t { display: none; }
+
+/* folds */
+@container app (max-width: 1100px) { .split { grid-template-columns: minmax(0, 1fr) 330px; } }
+@container app (max-width: 959px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .rail { position: absolute; z-index: 50; top: 0; bottom: 0; left: 0; width: min(320px, 88%); box-shadow: var(--shadow-pop); transform: translateX(-105%); transition: transform 0.5s var(--ease); }
+  .app.d-rail .rail { transform: none; }
+  .app.d-rail .scrim { opacity: 1; pointer-events: auto; }
+  .side-t { display: inline-grid; }
+  .ws-top { padding-right: 138px; }
+  .ws-meta .acts .lbl { display: none; }
+  .strip { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); padding: 8px 10px; }
+  .mobtabs { display: inline-flex; }
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .split[data-tab="logs"] > .thcol, .split[data-tab="thread"] > .logcol { display: none; }
+  .split > .thcol { border-left: 0; }
+}
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="app" id="app">
+    <aside class="rail">
+      <div class="rail-head"><h1><img class="brand" src="kit/spawner.svg" alt="">Spawner</h1>
+        <button class="ib" data-k="palette" aria-label="Command palette (Ctrl K)"><i class="ph ph-command"></i></button>
+        <button class="ib" data-k="theme" aria-label="Toggle theme"><i class="ph ph-moon"></i></button></div>
+      <label class="field"><i class="ph ph-funnel"></i><input id="tq" placeholder="Filter tasks, apps, branches"></label>
+      <div class="tasks" id="tasks"></div>
+      <div class="foot">
+        <button class="navrow" data-a="all"><i class="ph ph-rows"></i>All apps &amp; logs<span class="grow"></span><span class="muted mono" id="allcount" style="font-size:11px"></span></button>
+        <button class="navrow"><i class="ph ph-folder-simple"></i>Folders<span class="grow"></span><span class="muted mono" style="font-size:11px">3</span></button>
+      </div>
+    </aside>
+    <main class="ws" id="ws">
+      <div class="ws-h" id="wsh"></div>
+      <div id="alert"></div>
+      <div class="next" id="next"></div>
+      <div id="strip"></div>
+      <div class="split" id="body" data-tab="logs">
+        <section class="logcol" id="logcol"></section>
+        <section class="thcol" id="thcol" aria-label="Thread"></section>
+      </div>
+      <div class="status" id="status"></div>
+    </main>
+    <div class="scrim" data-a="scrim"></div>
+    <div class="winctl" aria-hidden="true"><span><i class="ph ph-minus"></i></span><span><i class="ph ph-square"></i></span><span><i class="ph ph-x"></i></span></div>
+  </div>
+</div>
+<script src="kit/kit.js"></script>
+<script>
+const { $, $$, esc, S, I, WTS, ui } = K;
+const B = { sel: "PAYMENT-9986", thread: {}, q: "", tab: "logs", newFor: null };
+const app = $("#app");
+const narrow = () => app.clientWidth < 960;
+
+const scope = () => (B.sel === "*" ? null : new Set(K.wt(B.sel).ids));
+const log = new K.LogView($("#logcol"), { scope, failCards: false, label: "" });
+const logAll = { el: null };
+
+/* what a task is waiting on decides where it sits; first match wins */
+const SECTIONS = [["needs", "Needs you"], ["agent", "Agent working"], ["running", "Apps running"], ["review", "In review"], ["quiet", "Quiet"]];
+function facts(w) {
+  const th = K.threadsOf(w.id), lead = th[0] || null, st = K.uiStatus(lead);
+  const failed = w.ids.filter((id) => I[id].state === "failed"), running = w.ids.filter((id) => I[id].state === "running");
+  const fixed = failed.find((id) => K.fixOf(id)?.status === "completed");
+  const pr = th.find((t) => t.pr);
+  let sec = "quiet", why = null;
+  if (st === "waiting") (sec = "needs"), (why = ["warn", "Waiting for your approval in T3"]);
+  else if (fixed) (sec = "needs"), (why = ["ok", `Agent fixed ${I[fixed].name} · retry it`]);
+  else if (failed.length && !["running", "starting"].includes(st)) (sec = "needs"), (why = ["bad", `${I[failed[0]].name} didn't build`]);
+  else if (["running", "starting"].includes(st)) (sec = "agent"), (why = failed.length ? ["agent", `Fixing ${I[failed[0]].name}`] : null);
+  else if (running.length) sec = "running";
+  else if (pr) sec = "review";
+  if (w.main) (sec = running.length ? "running" : "quiet"), (why = null);
+  return { lead, st, failed, running, pr, sec, why };
+}
+function taskRow(w) {
+  const f = facts(w);
+  const title = f.lead && !w.main ? f.lead.title : w.label;
+  const glyph = f.lead && !w.main ? `<span class="ts ${f.st}"></span>` : `<i class="ph ${w.main ? "ph-stack" : "ph-git-branch"} muted" style="font-size:14px"></i>`;
+  const unreg = K.t3For(w.id).kind === "unregistered";
+  return `<button class="task${B.sel === w.id ? " cur" : ""}" data-a="sel" data-id="${w.id}" aria-current="${B.sel === w.id}">
+    <span class="g">${glyph}</span><span class="t">${esc(title)}</span>
+    <span class="r"><span class="health">${w.ids.slice(0, 6).map((id) => `<span class="dot${I[id].state === "idle" ? " idle" : ""}" data-state="${I[id].state}" title="${esc(I[id].name)}: ${I[id].state}"></span>`).join("")}</span>${f.pr ? `<span class="pill pr" style="height:18px"><i class="ph-bold ph-git-pull-request"></i>#${f.pr.pr.number}</span>` : ""}</span>
+    <span class="s">${w.main ? `${w.projects.length} repos` : `${f.lead ? esc(w.label) + " · " : ""}${esc(w.branch)}`}${unreg ? " · not in T3" : !f.lead && !w.main ? " · no thread" : ""}</span>
+    ${f.why ? `<span class="why ${f.why[0]}">${esc(f.why[1])}</span>` : ""}</button>`;
+}
+function renderRail() {
+  const q = B.q.toLowerCase();
+  const list = WTS.filter((w) => !q || (w.label + w.branch + (K.lead(w.id)?.title || "") + w.ids.map((id) => I[id].name).join()).toLowerCase().includes(q));
+  const by = Object.fromEntries(SECTIONS.map(([k]) => [k, []]));
+  list.forEach((w) => by[facts(w).sec].push(w));
+  K.put($("#tasks"), SECTIONS.filter(([k]) => by[k].length).map(([k, label]) => `<div class="sec ${k}"><div class="sec-h"><span class="cap">${label}</span><span class="n">${by[k].length}</span></div>${by[k].map(taskRow).join("")}</div>`).join("") || `<p class="muted" style="padding:12px 8px">No tasks match.</p>`);
+  $("#allcount").textContent = `${Object.values(I).filter((i) => K.active(i.state)).length} running`;
+  $('[data-a="all"]').classList.toggle("cur", B.sel === "*");
+}
+
+function tile(id) {
+  const i = I[id], st = i.state, live = K.active(st), port = K.portOf(i);
+  const sub = st === "failed" ? `<span class="bad">${esc(i.exit)}</span>` : `<span>${esc(i.repo)}</span>${port ? `<span>·</span><a href="#" data-k="open-port" data-id="${id}">:${port} ↗</a>` : `<span>· ${esc(i.kind)}</span>`}`;
+  return `<div class="tile" data-state="${st}"><span class="dot${st === "idle" ? " idle" : ""}"></span><div class="meta"><div class="nm">${esc(i.name)}</div><div class="sub">${sub}</div></div><div class="acts">
+    ${live ? `<button class="ib sm" data-k="restart" data-id="${id}" aria-label="Restart ${esc(i.name)}" ${st === "stopping" ? "disabled" : ""}><i class="ph ph-arrow-clockwise"></i></button>` : ""}
+    <button class="ib sm${live ? " danger" : ""}" data-k="${live ? "stop" : "start"}" data-id="${id}" aria-label="${live ? "Stop" : st === "failed" ? "Retry" : "Run"} ${esc(i.name)}" ${st === "stopping" ? "disabled" : ""}><i class="ph-fill ${live ? "ph-stop" : st === "failed" ? "ph-arrow-clockwise" : "ph-play"}"></i></button></div><div class="bar"><i></i></div></div>`;
+}
+function renderWs() {
+  const tabs = narrow() ? `<div class="seg mobtabs" role="tablist"><button data-a="tab" data-t="logs" aria-pressed="${B.tab === "logs"}">Logs</button><button data-a="tab" data-t="thread" aria-pressed="${B.tab === "thread"}">Thread${waitingHere() ? ' <span class="ld w"></span>' : ""}</button></div>` : "";
+  $("#body").dataset.tab = B.tab;
+  if (B.sel === "*") {
+    K.put($("#wsh"), `<div class="ws-top"><button class="ib side-t" data-a="drawer" aria-label="Tasks"><i class="ph ph-list"></i></button><h2>All apps &amp; logs</h2><span class="grow"></span></div><div class="ws-meta"><span>Every worktree, merged, as Spawner shows it today</span></div>`);
+    K.put($("#next"), "");
+    K.put($("#strip"), `<div class="allapps">${WTS.map((w) => `<div class="grp"><b>${esc(w.label)}</b>${w.ids.map(tile).join("")}</div>`).join("")}</div>`);
+    $("#body").style.gridTemplateColumns = "minmax(0,1fr)";
+    $("#thcol").hidden = true;
+    return;
+  }
+  $("#body").style.gridTemplateColumns = "";
+  $("#thcol").hidden = false;
+  const w = K.wt(B.sel), threads = K.threadsOf(w.id), t3 = K.t3For(w.id);
+  const cur = S.threads[B.thread[w.id]]?.wt === w.id ? B.thread[w.id] : threads[0]?.threadId;
+  const th = cur && S.threads[cur];
+  const title = w.main ? "Main checkouts" : th ? th.title : w.label;
+  K.put($("#wsh"), `<div class="ws-top"><button class="ib side-t" data-a="drawer" aria-label="Tasks"><i class="ph ph-list"></i></button>${th ? `<span class="ts ${K.uiStatus(th)}"></span>` : ""}<h2>${esc(title)}</h2>${th ? `<span class="pill ${K.uiStatus(th) === "waiting" ? "warn" : "agent"}">${ui.statusWord(K.uiStatus(th))}</span>` : ""}<span class="grow"></span>${tabs}</div>
+    <div class="ws-meta"><span><i class="ph ph-git-branch"></i> ${esc(w.main ? "main" : w.label + " · " + w.branch)}</span><span><i class="ph ph-folders"></i> ${w.projects.map((p) => esc(p.repo)).join(", ")}</span>${threads.length > 1 ? `<span class="ttabs">${threads.map((t) => `<button class="ttab${t.threadId === cur ? " cur" : ""}" data-a="thread" data-id="${t.threadId}" title="${esc(t.title)}"><span class="ts ${K.uiStatus(t)}"></span><span>${esc(t.title)}</span></button>`).join("")}</span>` : ""}
+      <span class="acts">${th?.pr ? ui.prChip(th) : ""}${w.t3project ? `<button class="btn btn-ghost sm" data-k="t3-open" data-wt="${w.id}" title="t3 app ${esc(w.t3project)}"><i class="ph ph-arrow-square-out"></i><span class="lbl">Open in T3</span></button>` : ""}</span></div>`);
+  K.put($("#next"), w.ids.map((id) => ui.failCard(id)).join(""));
+  const live = w.ids.filter((id) => K.active(I[id].state)).length;
+  K.put($("#strip"), `<div class="strip"><div class="strip-h"><span class="cap">Apps · ${w.ids.length}</span><span class="muted mono" style="font-size:11px">${live ? live + " running" : "none running"}</span><span class="grow"></span><button class="btn btn-quiet sm" data-a="start-all"><i class="ph ph-play"></i>Start all</button><button class="btn btn-quiet sm" data-a="stop-all" ${live ? "" : "disabled"}><i class="ph ph-stop"></i>Stop all</button></div>${w.ids.map(tile).join("")}</div>`);
+  // thread column
+  let html;
+  if (w.main) html = `<div class="thcol-h"><span class="t">Thread</span></div><div class="empty-th"><b>Main checkouts aren't one task</b>Each repo is its own T3 project. Pick a task on the left to see its thread, or open a repo in T3 from the palette.</div>`;
+  else {
+    const problem = ui.t3Problem(w.id);
+    const showNew = B.newFor === w.id || !threads.length;
+    html = `<div class="thcol-h"><span class="t">${showNew && threads.length ? "New thread" : th ? "Conversation" : "Thread"}</span>${threads.length && t3.ok && !w.t3made ? `<button class="btn btn-quiet sm" data-a="new" aria-pressed="${showNew}"><i class="ph ph-plus"></i>New</button>` : ""}${th ? `<button class="ib sm" data-k="link" data-url="${esc(th.link)}" aria-label="Open thread in the web app"><i class="ph ph-arrow-square-out"></i></button>` : ""}</div>${problem}`
+      + (showNew ? `${threads.length ? "" : `<div class="empty-th"><b>No thread for ${esc(w.label)} yet</b>A thread started here runs in <code>${esc(w.t3project)}</code>, where Spawner runs these apps. It does not make another worktree.</div>`}<div style="flex:1"></div>${ui.newThread(w.id)}` : ui.conversation(cur));
+  }
+  K.put($("#thcol"), html);
+}
+const waitingHere = () => B.sel !== "*" && K.threadsOf(B.sel).some((t) => K.uiStatus(t) === "waiting");
+function render() {
+  renderRail();
+  renderWs();
+  K.put($("#status"), ui.statusBar());
+  K.put($("#alert"), ui.alertBar());
+}
+K.on("render", render);
+
+function focusWt(id) {
+  B.sel = id;
+  B.newFor = null;
+  app.classList.remove("d-rail");
+  log.hidden = new Set();
+  log.failCards = id === "*";
+  render();
+  log.update();
+}
+function focusThread(id) {
+  const th = S.threads[id];
+  if (!th) return;
+  B.thread[th.wt] = id;
+  B.tab = "thread";
+  focusWt(th.wt);
+}
+K.on("focus-thread", focusThread);
+K.on("thread-started", ({ id }) => focusThread(id));
+K.on("resize", () => (app.classList.remove("d-rail"), render()));
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-a]");
+  if (!b) return;
+  const d = b.dataset;
+  if (d.a === "sel") return focusWt(d.id);
+  if (d.a === "all") return focusWt("*");
+  if (d.a === "thread") { B.newFor = null; return focusThread(d.id); }
+  if (d.a === "new") { B.newFor = B.newFor === B.sel ? null : B.sel; render(); return setTimeout(() => $(`[data-newthread="${B.sel}"]`)?.focus(), 30); }
+  if (d.a === "tab") { B.tab = d.t; return render(); }
+  if (d.a === "drawer") return app.classList.add("d-rail");
+  if (d.a === "scrim") return app.classList.remove("d-rail");
+  if (d.a === "start-all") return K.wt(B.sel).ids.forEach((id) => K.app.start(id));
+  if (d.a === "stop-all") return K.wt(B.sel).ids.forEach((id) => K.app.stop(id));
+});
+$("#tq").oninput = (e) => ((B.q = e.target.value), render());
+document.addEventListener("keydown", (e) => {
+  if (!(e.altKey && /^[1-9]$/.test(e.key))) return;
+  const rows = $$(".task");
+  rows[+e.key - 1]?.click();
+});
+K.palette.extra = () => [
+  ...WTS.map((w) => ({ g: "Go to", icon: "ph-git-branch", label: `${K.lead(w.id) && !w.main ? K.lead(w.id).title + " · " : ""}${w.label}`, run: () => focusWt(w.id) })),
+  { g: "Go to", icon: "ph-rows", label: "All apps & logs", run: () => focusWt("*") },
+];
+render();
+K.boot({
+  focusWt, focusThread,
+  selectRefund: () => { B.tab = "logs"; render(); log.selectWhere((l) => l.inst === K.ID.api && (/rf_8851/.test(l.text) || l.text.startsWith("   at Cadence"))); },
+  morning: () => location.replace(location.pathname),
+  day: () => { focusWt("docs-search"); K.app.start(K.ID.docs); },
+});
+</script>
+</body>
+</html>

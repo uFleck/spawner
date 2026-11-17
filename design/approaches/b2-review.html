@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B2 · Review cockpit</title>
+<link rel="icon" href="kit/spawner.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<link rel="stylesheet" href="kit/kit.css">
+<style>
+/* B2 · review-first worktree cockpit. Rail: worktrees with open PRs first, each with Run stack.
+   Workspace: one worktree's stack (the hero) over its scoped logs (the evidence). No thread, no composer, no board. */
+.app { display: grid; grid-template-columns: 316px minmax(0, 1fr); height: 100%; }
+.rail { display: flex; flex-direction: column; min-height: 0; min-width: 0; padding: var(--pad) var(--pad) 0; background: var(--bg-surface); border-right: 1px solid var(--border-default); }
+.rail-head { display: flex; align-items: center; gap: 4px; padding: 2px 2px 8px 6px; }
+.rail-head h1 { display: flex; align-items: center; gap: 8px; flex: 1; margin: 0; font: 600 13px/1.2 var(--font-ui); }
+.rail .field { margin-bottom: 4px; }
+.tasks { flex: 1; overflow: auto; min-height: 0; margin: 0 -5px; padding: 0 5px 10px; }
+.sec { margin-top: 10px; }
+.sec-h { display: flex; align-items: center; gap: 6px; width: 100%; height: 24px; padding: 0 6px; border: 0; background: none; color: inherit; text-align: left; }
+button.sec-h { cursor: pointer; border-radius: var(--r); }
+button.sec-h:hover { background: var(--hover-tint); }
+.sec-h .n { font: 500 10.5px var(--font-mono); color: var(--text-tertiary); }
+.sec-h .src { margin-left: auto; font: 400 10.5px var(--font-mono); color: var(--text-tertiary); }
+.sec-h i { color: var(--text-tertiary); font-size: 11px; transition: transform var(--med) var(--ease); }
+.sec.closed .sec-h i { transform: rotate(-90deg); }
+.task { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 1px 8px; align-items: center; width: 100%; padding: 7px 6px 7px 6px; border-radius: var(--r); text-align: left; cursor: pointer; transition: background var(--fast), box-shadow 0.25s; }
+.task:hover { background: var(--hover-tint); }
+.task:focus-visible { outline: 0; box-shadow: var(--ring); }
+.task.cur { background: var(--sel-bg); box-shadow: inset 2px 0 0 var(--accent); }
+.task .g { grid-row: 1; display: grid; place-items: center; font-size: 15px; }
+.task .t { font: 600 13px/1.3 var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task .r { grid-row: 1 / span 2; grid-column: 3; display: flex; align-items: center; gap: 6px; }
+.task .s { grid-column: 2; font: 500 12.5px/1.35 var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task .m { grid-column: 2 / span 2; display: flex; align-items: center; gap: 6px; min-width: 0; font: 400 11px/1.4 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; }
+.task .m .bad { color: var(--err); }
+.task.plain .s { font: 400 11px/1.3 var(--font-mono); color: var(--text-tertiary); }
+.g .pr-ok { color: var(--ok); } .g .pr-warn { color: var(--warn); } .g .pr-bad { color: var(--err); } .g .pr-draft { color: var(--text-tertiary); }
+.rs { display: inline-flex; align-items: center; gap: 4px; font: 500 11px var(--font-ui); white-space: nowrap; }
+.rs.ok { color: var(--ok); } .rs.warn { color: var(--warn); } .rs.bad { color: var(--err); } .rs.mute { color: var(--text-tertiary); }
+.t3i { display: inline-grid; place-items: center; height: 15px; padding: 0 4px; border-radius: 3px; background: var(--hover-tint); color: var(--text-secondary); font: 600 9.5px var(--font-mono); letter-spacing: .02em; }
+.dots { display: flex; gap: 3px; }
+.dots .dot { width: 7px; height: 7px; }
+.runbtn { height: 24px; padding: 0 8px 0 7px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--bg-page); color: var(--text-primary); font: 600 11.5px var(--font-ui); display: inline-flex; align-items: center; gap: 5px; cursor: pointer; transition: border-color var(--fast), color var(--fast), transform var(--fast); }
+.runbtn i { color: var(--accent); }
+.runbtn:hover { border-color: var(--accent); }
+.runbtn:active { transform: scale(.95); }
+.runbtn:focus-visible { outline: 0; box-shadow: var(--ring); }
+.runbtn.stop i { color: var(--err); }
+.runbtn.stop:hover { border-color: var(--err); }
+.foot { flex: none; margin: 0 -10px; padding: 6px 10px; border-top: 1px solid var(--border-default); }
+.navrow { display: flex; align-items: center; gap: 10px; width: 100%; height: 32px; padding: 0 8px; border: 0; border-radius: var(--r); background: none; color: var(--text-secondary); font: 500 13px var(--font-ui); cursor: pointer; text-align: left; }
+.navrow:hover { background: var(--hover-tint); color: var(--text-primary); }
+.navrow:focus-visible { outline: 0; box-shadow: var(--ring); }
+.navrow i { font-size: 16px; color: var(--text-tertiary); }
+
+/* workspace */
+.ws { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ws-h { flex: none; padding: 0 12px 0 16px; background: var(--bg-surface); }
+.ws-top { display: flex; align-items: center; gap: 10px; height: var(--bar-h); padding-right: 138px; }
+.ws-top h2 { margin: 0; min-width: 0; font: 600 15px/1.2 var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-meta { display: flex; align-items: center; gap: 8px; min-height: 36px; padding-bottom: 8px; }
+.ws-meta .sub { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--text-tertiary); font: 400 11.5px var(--font-mono); white-space: nowrap; overflow: hidden; }
+.ws-meta .sub span { overflow: hidden; text-overflow: ellipsis; }
+.ws-meta .acts { display: flex; gap: 6px; margin-left: auto; flex: none; }
+.side-t { display: none; }
+.prs { flex: none; display: flex; flex-direction: column; background: var(--bg-surface); border-bottom: 1px solid var(--border-default); }
+.prl { display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 0 12px 0 16px; border-top: 1px solid var(--border-default); font: 400 12.5px var(--font-ui); }
+.prl > i { font-size: 15px; }
+.prl .num { font: 600 12px var(--font-mono); }
+.prl .ti { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prl .ck { display: inline-flex; align-items: center; gap: 5px; font: 500 11.5px var(--font-mono); white-space: nowrap; }
+.prl .ck.ok { color: var(--ok); } .prl .ck.bad { color: var(--err); } .prl .ck.mute { color: var(--text-tertiary); }
+.prl .via { color: var(--text-tertiary); font: 400 10.5px var(--font-mono); white-space: nowrap; }
+
+.stack { flex: none; padding: 10px 12px 12px; border-bottom: 1px solid var(--border-default); }
+.stack-h { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 0 2px 8px; }
+.stack-h .nm { font: 600 13px var(--font-ui); white-space: nowrap; }
+.stack-h .from { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font: 400 11px var(--font-mono); }
+.stack-h .sum { color: var(--text-secondary); font: 500 11px var(--font-mono); white-space: nowrap; }
+.stack-h .fold { display: none; }
+.apps { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; align-items: start; }
+.ap { position: relative; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; padding: 9px 8px 9px 12px; border: 1px solid var(--border-default); border-radius: var(--r); background: var(--bg-surface); transition: border-color .25s, background .25s; animation: enter .4s var(--ease) backwards; }
+.ap:hover { border-color: var(--border-strong); }
+.ap[data-conflict] { border-color: color-mix(in srgb, var(--err) 60%, var(--border-default)); }
+.ap > .dot { grid-row: 1; }
+.ap .nm { font: 600 13px var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ap .sub { grid-column: 2; display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-tertiary); font: 400 11px var(--font-mono); white-space: nowrap; overflow: hidden; }
+.ap .acts { grid-row: 1 / span 2; grid-column: 3; display: flex; align-items: center; gap: 2px; }
+.ap .bar { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; overflow: hidden; border-radius: 0 0 var(--r) var(--r); opacity: 0; }
+.ap[data-state="building"] .bar, .ap[data-state="starting"] .bar { opacity: 1; }
+.ap .bar i { display: block; width: 40%; height: 100%; background: var(--warn); animation: slide 1.1s ease-in-out infinite; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+.port { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 2px 0 6px; border-radius: var(--r); background: var(--hover-tint); color: var(--text-primary); font: 500 11.5px var(--font-mono); white-space: nowrap; }
+a.port { text-decoration: none; }
+a.port:hover { background: var(--accent-soft); color: var(--accent-text); }
+.port .tag { padding: 0 5px; border-radius: 3px; font: 500 10px/16px var(--font-mono); color: var(--text-tertiary); }
+.port .tag.ov { background: var(--accent-soft); color: var(--accent-text); }
+.port.none { background: none; padding: 0; color: var(--text-tertiary); }
+.ap .stale { color: var(--warn); font: 500 10.5px var(--font-mono); }
+.ap .edit { grid-column: 2 / span 2; display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.ap .edit input { width: 84px; height: 26px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--bg-page); font: 500 12.5px var(--font-mono); outline: 0; }
+.ap .edit input:focus { border-color: var(--accent); box-shadow: var(--ring); }
+.ap .edit input.bad { border-color: var(--err); }
+.ap .edit .hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font: 400 11px var(--font-ui); }
+.ap .edit .hint.bad { color: var(--err); }
+.ap .cf { grid-column: 1 / span 3; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed color-mix(in srgb, var(--err) 40%, transparent); color: var(--err); font: 500 12px/1.4 var(--font-ui); }
+.ap .cf span { flex: 1 1 100%; }
+.ap .cf b { font-family: var(--font-mono); font-weight: 600; }
+.editfoot { display: flex; align-items: center; gap: 10px; margin-top: 10px; color: var(--text-tertiary); font: 400 11.5px/1.45 var(--font-ui); }
+.editfoot code, .nostack code { font: 500 11px var(--font-mono); color: var(--text-secondary); }
+.nostack { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 4px 12px; padding: 14px 14px; border: 1px dashed var(--border-strong); border-radius: var(--r); }
+.nostack > i { grid-row: 1 / span 3; font-size: 22px; color: var(--warn); margin-top: 1px; }
+.nostack b { font: 600 13.5px var(--font-ui); }
+.nostack p { margin: 0; max-width: 720px; color: var(--text-secondary); font: 400 12.5px/1.5 var(--font-ui); }
+.picks2 { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.pk { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px 0 8px; border: 1px solid var(--border-default); border-radius: var(--r); font: 500 12.5px var(--font-ui); cursor: pointer; }
+.pk:has(input:checked) { border-color: var(--accent); background: var(--sel-bg); }
+.pk input { accent-color: var(--accent); margin: 0; }
+.pk small { color: var(--text-tertiary); font: 400 11px var(--font-mono); }
+.nostack .row2 { display: flex; gap: 8px; margin-top: 6px; }
+.newnote { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--text-secondary); font: 400 12px var(--font-ui); }
+.newnote i { color: var(--accent); }
+.logcol { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.winctl { position: absolute; top: 0; right: 0; z-index: 30; display: flex; height: calc(var(--bar-h) - 1px); }
+.winctl span { display: grid; place-items: center; width: 46px; color: var(--text-secondary); font-size: 14px; }
+.scrim { position: absolute; inset: 0; z-index: 40; background: color-mix(in srgb, var(--bg-page) 60%, transparent); opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+.status .sbtn.off { opacity: .75; }
+@keyframes enter { from { opacity: 0; transform: translateY(4px); } }
+
+/* fold: 720 × 560 */
+@container app (max-width: 959px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .rail { position: absolute; z-index: 50; top: 0; bottom: 0; left: 0; width: min(330px, 90%); box-shadow: var(--shadow-pop); transform: translateX(-105%); transition: transform 0.5s var(--ease); }
+  .app.d-rail .rail { transform: none; }
+  .app.d-rail .scrim { opacity: 1; pointer-events: auto; }
+  .side-t { display: inline-grid; }
+  .ws-h { padding-left: 8px; }
+  .ws-meta .acts .lbl { display: none; }
+  .ws-meta .sub .path { display: none; }
+  .prl { padding-left: 12px; }
+  .prl .via, .prl .who { display: none; }
+  .stack { padding: 8px 10px; }
+  .stack-h { padding-bottom: 0; }
+  .stack-h .from { display: none; }
+  .stack-h .fold { display: inline-grid; }
+  .stack.folded .apps, .stack.folded .editfoot, .stack.folded .newnote { display: none; }
+  .stack:not(.folded) .apps { margin-top: 8px; }
+  .apps { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="app" id="app">
+    <aside class="rail" aria-label="Worktrees">
+      <div class="rail-head"><h1><img class="brand" src="kit/spawner.svg" alt="">Spawner</h1>
+        <button class="ib" data-a="theme" aria-label="Toggle theme"><i class="ph ph-moon"></i></button></div>
+      <label class="field"><i class="ph ph-funnel"></i><input id="tq" placeholder="Filter worktrees, PRs, apps"></label>
+      <div class="tasks" id="rail"></div>
+      <div class="foot">
+        <button class="navrow" data-a="nav" data-n="Folders"><i class="ph ph-folder-simple"></i>Folders<span class="grow"></span><span class="muted mono" style="font-size:11px">3</span></button>
+        <button class="navrow" data-a="nav" data-n="Scripts"><i class="ph ph-terminal-window"></i>Scripts<span class="grow"></span><span class="muted mono" style="font-size:11px">4</span></button>
+      </div>
+    </aside>
+    <main class="ws" id="ws">
+      <div class="ws-h" id="wsh"></div>
+      <div class="prs" id="prs"></div>
+      <section class="stack" id="stack" aria-label="Stack"></section>
+      <section class="logcol" id="logcol" aria-label="Logs"></section>
+      <div class="status" id="status"></div>
+    </main>
+    <div class="scrim" data-a="scrim"></div>
+    <div class="winctl" aria-hidden="true"><span><i class="ph ph-minus"></i></span><span><i class="ph ph-square"></i></span><span><i class="ph ph-x"></i></span></div>
+  </div>
+</div>
+<script src="kit/review.js"></script>
+<script>
+const { $, $$, esc, S, I, WTS } = R;
+const B = { sel: "t3-8f4d95f7", q: "", recentOpen: false, edit: false, stackOpen: false, picks: {} };
+const app = $("#app");
+const narrow = () => app.clientWidth < 960;
+const cur = () => R.wt(B.sel);
+const log = new R.LogView($("#logcol"), () => R.scopeIds(cur()));
+
+/* ───────── review facts ───────── */
+function review(p) {
+  if (p.via === "t3") return { cls: "mute", icon: "pr-ok", text: "Open · review state needs gh" };
+  const c = p.checks;
+  if (p.isDraft) return { cls: "mute", icon: "pr-draft", text: "Draft", checks: c.pending ? ["mute", `${c.pending} checks running`] : null };
+  const checks = c.fail ? ["bad", `${c.fail} failing: ${c.failing.join(", ")}`] : c.pending ? ["mute", `${c.pending} checks running`] : ["ok", `${c.pass}/${c.pass} checks passed`];
+  if (p.reviewDecision === "CHANGES_REQUESTED") return { cls: "warn", icon: "pr-warn", text: "Changes requested", checks };
+  if (c.fail) return { cls: "bad", icon: "pr-bad", text: "Checks failing", checks };
+  if (p.reviewDecision === "APPROVED") return { cls: "ok", icon: "pr-ok", text: "Approved", checks };
+  return { cls: "mute", icon: "pr-ok", text: "Review pending", checks };
+}
+const ownActive = (w) => R.scopeIds(w).some((id) => I[id].from === "worktree" && R.active(I[id].state));
+const stackState = (w) => {
+  const st = R.stack(w);
+  if (!st) return { st, live: 0, n: 0, conflict: null };
+  return { st, live: st.items.filter((i) => R.active(i.state)).length, n: st.items.length, conflict: st.items.find((i) => i.conflict) };
+};
+const dots = (ids) => `<span class="dots">${ids.map((id) => `<span class="dot${I[id].state === "idle" ? " idle" : ""}" data-state="${I[id].state}" title="${esc(I[id].name)}: ${I[id].state}"></span>`).join("")}</span>`;
+
+/* ───────── rail ───────── */
+function runBtn(w, label = true) {
+  const { st, live } = stackState(w);
+  if (!st) return `<span class="muted mono" style="font-size:10.5px">no stack</span>`;
+  const ownLive = ownActive(w);
+  return ownLive
+    ? `${dots(st.items.map((i) => i.id))}<button class="runbtn stop" data-a="row-stop" data-id="${w.id}" aria-label="Stop stack ${esc(w.label)}"><i class="ph-fill ph-stop"></i>${label ? "Stop" : ""}</button>`
+    : `<button class="runbtn" data-a="row-run" data-id="${w.id}" aria-label="Run stack ${esc(w.label)}"><i class="ph-fill ph-play"></i>${label ? "Run stack" : ""}</button>`;
+}
+function reviewRow(w) {
+  const prs = R.prsOf(w), p = prs[0], rv = review(p), th = R.threadOf(w), { st, conflict } = stackState(w);
+  const repos = Object.keys(w.co).concat(st ? st.items.filter((i) => i.from === "main").map((i) => i.repo) : []);
+  return `<div class="task${B.sel === w.id ? " cur" : ""}" role="button" tabindex="0" data-a="sel" data-id="${w.id}" aria-current="${B.sel === w.id}">
+    <span class="g"><i class="ph-bold ph-git-pull-request ${rv.icon}"></i></span><span class="t">${esc(w.label)}</span>
+    <span class="r">${runBtn(w)}</span>
+    <span class="s" title="${esc(p.title || "")}"><span class="mono" style="font-size:12px;color:var(--text-secondary)">#${p.number}</span> ${esc(p.title || "(title needs gh)")}${prs.length > 1 ? ` <span class="muted">+${prs.length - 1}</span>` : ""}</span>
+    <span class="m"><span class="rs ${rv.cls}">${esc(rv.text)}</span>${rv.checks && rv.checks[0] === "bad" && rv.cls !== "bad" ? `<span class="bad">· ${rv.checks[1].split(":")[0]}</span>` : ""}<span>· ${[...new Set(repos)].join(" · ")}</span>${st ? `<span>· ${st.items.length} apps</span>` : ""}${conflict ? `<span class="bad">· port ${conflict.conflict.port} busy</span>` : ""}<span class="grow"></span>${th ? `<span class="t3i" title="T3 thread: ${esc(th.title)}">T3</span>` : ""}</span></div>`;
+}
+function plainRow(w) {
+  const { st } = stackState(w), ids = R.scopeIds(w), live = ids.filter((id) => R.active(I[id].state)).length, th = R.threadOf(w);
+  return `<div class="task plain${B.sel === w.id ? " cur" : ""}" role="button" tabindex="0" data-a="sel" data-id="${w.id}" aria-current="${B.sel === w.id}">
+    <span class="g"><i class="ph ph-git-branch muted"></i></span><span class="t">${esc(w.label)}</span>
+    <span class="r">${live ? dots(ids) : ""}${st ? (ownActive(w) ? `<button class="runbtn stop" data-a="row-stop" data-id="${w.id}" aria-label="Stop stack ${esc(w.label)}"><i class="ph-fill ph-stop"></i></button>` : "") : ""}</span>
+    <span class="s">${Object.keys(w.co).join(" · ")} · ${st ? `${st.items.length} apps` : "no stack yet"}${live ? ` · ${live} running` : ` · ${R.ago(R.now() - w.touched * 60_000)}`}${th ? ` <span class="t3i">T3</span>` : ""}</span></div>`;
+}
+function renderRail() {
+  const q = B.q.toLowerCase();
+  const match = (w) => !q || [w.label, w.branch, ...Object.keys(w.co), ...R.prsOf(w).map((p) => `#${p.number} ${p.title}`), ...R.scopeIds(w).map((id) => I[id].name)].join(" ").toLowerCase().includes(q);
+  const list = WTS.filter(match);
+  const inReview = list.filter((w) => R.prsOf(w).length);
+  const running = list.filter((w) => !inReview.includes(w) && ownActive(w));
+  const recent = list.filter((w) => !inReview.includes(w) && !running.includes(w)).sort((a, b) => a.touched - b.touched);
+  const src = R.reviewSource();
+  const open = B.recentOpen || !!q || recent.some((w) => w.id === B.sel);
+  R.put($("#rail"), (src && inReview.length ? `<div class="sec"><div class="sec-h"><span class="cap">In review</span><span class="n">${inReview.length}</span><span class="src" title="${src === "gh" ? "gh pr list, once per repo, every 60 s" : "gh is unavailable: open PRs come from t3 thread list"}">${src}</span></div>${inReview.map(reviewRow).join("")}</div>` : "")
+    + (running.length ? `<div class="sec"><div class="sec-h"><span class="cap">Running</span><span class="n">${running.length}</span></div>${running.map(plainRow).join("")}</div>` : "")
+    + (recent.length ? `<div class="sec${open ? "" : " closed"}"><button class="sec-h" data-a="recent" aria-expanded="${open}"><i class="ph-bold ph-caret-down"></i><span class="cap">Recent</span><span class="n">${recent.length}</span></button>${open ? recent.map(plainRow).join("") : ""}</div>` : "")
+    || `<p class="muted" style="padding:12px 8px">No worktree matches.</p>`);
+}
+
+/* ───────── workspace ───────── */
+function renderHead() {
+  const w = cur(), prs = R.prsOf(w), th = R.threadOf(w), { st, live, n } = stackState(w);
+  const allLive = st && live === n;
+  const repos = Object.entries(w.co);
+  R.put($("#wsh"), `<div class="ws-top"><button class="ib side-t" data-a="drawer" aria-label="Worktrees"><i class="ph ph-list"></i></button><h2>${esc(w.label)}</h2>${prs.map((p) => { const rv = review(p); return `<span class="pill ${rv.cls === "mute" ? "pr" : rv.cls}" title="${esc(rv.text)}"><i class="ph-bold ph-git-pull-request"></i>#${p.number} · ${esc(rv.text)}</span>`; }).join("")}<span class="grow"></span></div>
+    <div class="ws-meta"><span class="sub">${w.branch !== w.label ? `<span><i class="ph ph-git-branch"></i> ${esc(w.branch)}</span>` : ""}<span><i class="ph ph-folders"></i> ${esc([...new Set([...Object.keys(w.co), ...(st ? st.items.filter((i) => i.from === "main").map((i) => i.repo + " (main)") : [])])].join(" · "))}</span><span class="path" title="${esc(repos.map(([, p]) => p).join("\n"))}"><i class="ph ph-folder"></i> ${esc(repos.map(([, p]) => p).join(", "))}</span></span>
+      <span class="acts">${th ? `<button class="btn btn-quiet sm" data-a="t3" title="Opens the thread in T3 Code. Nothing is registered."><i class="ph ph-arrow-square-out"></i><span class="lbl">Open in T3</span></button>` : ""}${prs.length ? `<button class="btn btn-ghost sm" data-a="pr" data-url="${esc(prs[0].url)}"><i class="ph ph-github-logo"></i><span class="lbl">Open PR</span></button>` : ""}${st ? `<button class="btn btn-ghost sm" data-a="stop-stack" ${live ? "" : "disabled"}><i class="ph-fill ph-stop"></i><span class="lbl">Stop stack</span></button><button class="btn btn-primary sm" data-a="run-stack" ${allLive ? "disabled" : ""}><i class="ph-fill ph-play"></i>${allLive ? "Stack running" : live ? "Run the rest" : "Run stack"}</button>` : ""}</span></div>`);
+  const src = R.reviewSource();
+  R.put($("#prs"), prs.map((p) => {
+    const rv = review(p);
+    return `<div class="prl"><i class="ph-bold ph-git-pull-request ${rv.icon}" style="color:var(--${rv.cls === "mute" ? "text-tertiary" : rv.cls})"></i><span class="num">#${p.number}</span><span class="ti">${esc(p.title || "")}</span><span class="rs ${rv.cls}">${esc(rv.text)}${p.by && p.reviewDecision ? `<span class="who muted" style="font-weight:400">&nbsp;by ${esc(p.by)}</span>` : ""}</span>${rv.checks ? `<span class="ck ${rv.checks[0]}"><i class="ph-bold ${rv.checks[0] === "ok" ? "ph-check" : rv.checks[0] === "bad" ? "ph-x" : "ph-circle-dashed"}"></i>${esc(rv.checks[1])}</span>` : ""}<span class="grow"></span><span class="via">${esc(R.REPOS[p.repo].gh)} · via ${src} · <span data-ago="${src === "gh" ? S.ghAt : S.t3At}">${R.ago(src === "gh" ? S.ghAt : S.t3At)}</span></span></div>`;
+  }).join(""));
+  $("#prs").hidden = !prs.length;
+}
+function portView(i, w) {
+  if (i.defPort == null) return `<span class="port none">${R.PORTABLE[i.kind] ? "no port · worker" : "port not settable"}</span>`;
+  const p = R.portOf(i), live = i.state === "running", ov = R.overridden(i);
+  const tag = `<span class="tag${ov ? " ov" : ""}" title="${ov ? `Override for ${esc(i.wtLabel)}. Repo default: ${i.defPort}` : "From spawner.stack.json"}">${ov ? "override" : "default"}</span>`;
+  const shown = live ? i.runPort : p;
+  return live ? `<a class="port" href="#" data-a="open" data-id="${esc(i.id)}" title="Open ${i.scheme || "http"}://localhost:${shown}">:${shown} ↗${tag}</a>` : `<span class="port">:${p}${tag}</span>`;
+}
+function appTile(i, w) {
+  const st = i.state, live = R.active(st), cf = i.conflict;
+  const where = i.from === "main" ? `<span title="${esc(i.checkout)}">main · shared</span>` : `<span title="${esc(i.checkout)}">${esc(i.repo)}</span>`;
+  const stale = live && i.runPort != null && i.runPort !== R.portOf(i) ? `<span class="stale">restart → :${R.portOf(i)}</span>` : "";
+  const edit = B.edit && i.defPort != null ? `<div class="edit"><input type="text" inputmode="numeric" data-key="port:${esc(i.id)}" data-port="${esc(i.id)}" value="${R.portOf(i)}" aria-label="Port for ${esc(i.name)}"><button class="btn btn-quiet sm" data-a="port-reset" data-id="${esc(i.id)}" ${R.overridden(i) ? "" : "disabled"}>Default ${i.defPort}</button><span class="hint" data-hint="${esc(i.id)}">${i.from === "main" ? "main checkout: applies wherever it's shared" : `only ${esc(i.wtLabel)}`}</span></div>` : "";
+  const conflict = cf ? `<div class="cf" role="alert"><span><i class="ph-fill ph-warning-circle"></i> Port <b>${cf.port}</b> is in use by ${esc(cf.holder.name)}${cf.holder.where ? ` @ ${esc(cf.holder.where)}` : " (outside Spawner)"}. ${esc(i.name)} didn't start.</span><button class="btn btn-ghost sm" data-a="cf-free" data-id="${esc(i.id)}" style="color:inherit;border-color:currentColor">Use ${cf.free} and start</button><button class="btn btn-quiet sm" data-a="cf-edit" data-id="${esc(i.id)}">Edit port</button>${cf.holder.id ? `<button class="btn btn-quiet sm" data-a="cf-stop" data-id="${esc(i.id)}">Stop that one</button>` : ""}</div>` : "";
+  return `<div class="ap" data-state="${st}"${cf ? " data-conflict" : ""}><span class="dot${st === "idle" ? " idle" : ""}" data-state="${st}"></span><span class="nm">${esc(i.name)}</span>
+    <span class="acts">${portView(i, w)}<button class="ib sm${live ? " danger" : ""}" data-a="${live ? "stop" : "start"}" data-id="${esc(i.id)}" aria-label="${live ? "Stop" : "Run"} ${esc(i.name)}" ${st === "stopping" ? "disabled" : ""}><i class="ph-fill ${live ? "ph-stop" : "ph-play"}"></i></button></span>
+    <span class="sub">${esc(i.kind)} · ${where} · ${live ? esc(st) : st === "idle" && cf ? "blocked" : "stopped"} ${stale}</span>${edit}${conflict}<div class="bar"><i></i></div></div>`;
+}
+function renderStack() {
+  const w = cur(), el = $("#stack"), { st, live, n } = stackState(w);
+  el.classList.toggle("folded", narrow() && !B.stackOpen && !(st && st.items.some((i) => i.conflict)));
+  const fold = `<button class="ib sm fold" data-a="fold" aria-expanded="${!el.classList.contains("folded")}" aria-label="Show stack"><i class="ph ph-caret-${el.classList.contains("folded") ? "down" : "up"}"></i></button>`;
+  if (!st) {
+    const det = R.detected(w), repo = Object.keys(w.co)[0];
+    B.picks[w.id] ||= Object.fromEntries(det.map((d) => [d.app.name, !d.app.task]));
+    el.classList.remove("folded");
+    return R.put(el, `<div class="nostack"><i class="ph ph-stack-plus"></i><b>No stack yet for ${esc(repo)}</b>
+      <p>Spawner found these apps in ${esc(w.label)}. Pick the ones a test run needs. Spawner writes <code>${esc(repo)}/spawner.stack.json</code> in this worktree; commit it and every new worktree of ${esc(repo)} has a stack ready.</p>
+      <div><div class="picks2">${det.map((d) => `<label class="pk"><input type="checkbox" data-pick="${esc(d.app.name)}" ${B.picks[w.id][d.app.name] ? "checked" : ""}>${esc(d.app.name)}<small>${esc(d.app.kind)}${d.app.port ? " :" + d.app.port : d.app.task ? " · task" : ""}</small></label>`).join("")}</div>
+      <div class="row2"><button class="btn btn-primary sm" data-a="adopt"><i class="ph ph-check"></i>Use detected apps</button><button class="btn btn-ghost sm" data-a="ai-prompt"><i class="ph ph-copy"></i>Copy AI prompt</button></div></div></div>`);
+  }
+  const opens = st.items.filter((i) => st.open.includes(i.name) && i.state === "running");
+  R.put(el, `<div class="stack-h"><span class="cap">Stack</span><span class="nm">${esc(st.name)}</span><span class="from" title="${esc(st.file)}">${esc(st.repo)}/spawner.stack.json${st.fresh ? " · new, not committed" : ""}</span><span class="sum">${live ? `${live}/${n} running` : `${n} apps · ready`}</span><span class="grow"></span>
+      ${opens.map((i) => `<button class="btn btn-ghost sm" data-a="open" data-id="${esc(i.id)}"><i class="ph ph-globe"></i>Open ${esc(i.name)}</button>`).join("")}<button class="btn btn-quiet sm" data-a="edit" aria-pressed="${B.edit}"><i class="ph ph-${B.edit ? "check" : "pencil-simple"}"></i>${B.edit ? "Done" : "Edit ports"}</button>${fold}</div>
+    <div class="apps">${st.items.map((i) => appTile(i, w)).join("")}</div>
+    ${B.edit ? `<div class="editfoot"><i class="ph ph-info"></i><span>A change here is an override for <b>${esc(w.label)}</b>, kept by Spawner and never committed. It applies at the next start. Repo defaults live in <code>${esc(st.repo)}/spawner.stack.json</code>. Agents set the same thing with <code>hub_set_port</code>.</span><span class="grow"></span><button class="btn btn-primary sm" data-a="save-ports">Save ports</button></div>` : ""}
+    ${st.fresh ? `<div class="newnote"><i class="ph-fill ph-check-circle"></i>Wrote <code>${esc(st.file)}</code>. Commit it so new worktrees of ${esc(st.repo)} start with this stack.<button class="btn btn-quiet sm" data-a="copy-json"><i class="ph ph-copy"></i>Copy JSON</button></div>` : ""}`);
+}
+function renderStatus() {
+  const run = Object.values(I).filter((i) => i.state === "running").length;
+  R.put($("#status"), `<span class="g"><span class="dot" style="background:var(--ok)"></span>${run} running</span><span class="sp"></span>
+    <button class="sbtn${S.gh === "ok" ? "" : " off"}" data-a="src" data-s="gh" title="gh pr list per repo, cached 60 s"><i class="ph ph-github-logo"></i>${S.gh === "ok" ? `gh · <span data-ago="${S.ghAt}">${R.ago(S.ghAt)}</span>` : "gh not found"}</button>
+    <button class="sbtn${S.t3 === "ok" ? "" : " off"}" data-a="src" data-s="t3" title="t3 thread list per repo, every 60 s. Link only; registers nothing."><span class="dot" style="background:${S.t3 === "ok" ? "var(--ok)" : "var(--text-tertiary)"}"></span>${S.t3 === "ok" ? "T3 · 1 project" : "T3 not found"}</button>
+    <button class="sbtn" title="MCP server for agents: hub_get_stack, hub_set_port, hub_start_stack, hub_stop_stack"><i class="ph ph-plugs-connected"></i>mcp :38417</button>`);
+}
+function render() {
+  renderRail();
+  renderHead();
+  renderStack();
+  renderStatus();
+}
+R.on("render", render);
+
+/* ───────── actions ───────── */
+function select(id) {
+  B.sel = id;
+  B.edit = false;
+  B.stackOpen = false;
+  app.classList.remove("d-rail");
+  log.hidden = new Set();
+  S.sel.clear();
+  render();
+  log.update();
+}
+function savePorts() {
+  let bad = null;
+  $$("[data-port]").forEach((inp) => {
+    const i = I[inp.dataset.port], v = +inp.value;
+    if (!Number.isInteger(v) || v < 1024 || v > 65535) return (bad = `${i.name}: ${inp.value} isn't a port (1024–65535)`);
+    if (v !== R.portOf(i)) R.setPort(i.id, v);
+  });
+  if (bad) return R.toast(bad, { kind: "bad", icon: "ph-x-circle" });
+  B.edit = false;
+  render();
+}
+function checkPort(inp) {
+  const i = I[inp.dataset.port], v = +inp.value, hint = $(`[data-hint="${CSS.escape(i.id)}"]`);
+  const holder = Number.isInteger(v) ? R.holderOf(v, i) : null;
+  const taken = !holder && Number.isInteger(v) && R.taken(v, i) ? Object.values(I).find((x) => x !== i && R.portOf(x) === v) : null;
+  const msg = !Number.isInteger(v) || v < 1024 || v > 65535 ? "1024–65535" : holder ? `in use by ${holder.name}${holder.where ? " @ " + holder.where : ""} · try ${R.freePort(v, i)}` : taken ? `given to ${taken.name} @ ${taken.wtLabel} · try ${R.freePort(v, i)}` : v === i.defPort ? "repo default" : `override for ${i.from === "main" ? "main" : i.wtLabel}`;
+  inp.classList.toggle("bad", !!(holder || taken) || !Number.isInteger(v));
+  hint.textContent = msg;
+  hint.classList.toggle("bad", inp.classList.contains("bad"));
+}
+const aiPrompt = (w) => {
+  const repo = Object.keys(w.co)[0], det = R.detected(w);
+  return `Add a Spawner stack to ${repo}. Create ${repo}/spawner.stack.json at the repo root with the apps a reviewer needs to run and test a branch:\n\n{\n  "name": "…",\n  "apps": [ { "repo": "${repo}", "app": "<app name as Spawner lists it>", "port": <default port> } ],\n  "open": ["<the app to open in the browser>"]\n}\n\nApps Spawner detected in ${w.co[repo]}:\n${det.map((d) => `- ${d.app.name} (${d.app.kind}${d.app.port ? `, port ${d.app.port}` : ""}${d.app.task ? ", task" : ""})`).join("\n")}\n\nThen call hub_rescan and hub_get_stack({ worktree: "${w.label}" }) to check it, and hub_start_stack to run it.`;
+};
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-a]");
+  if (!b) return;
+  const d = b.dataset, w = cur();
+  if (b.tagName === "A") e.preventDefault();
+  switch (d.a) {
+    case "sel": return select(d.id);
+    case "row-run": e.stopPropagation(); if (B.sel !== d.id) select(d.id); return R.startStack(R.wt(d.id));
+    case "row-stop": e.stopPropagation(); return R.stopStack(R.wt(d.id));
+    case "run-stack": return R.startStack(w);
+    case "stop-stack": return R.stopStack(w);
+    case "start": return R.app.start(d.id);
+    case "stop": return R.app.stop(d.id);
+    case "open": return R.app.open(d.id);
+    case "edit": B.edit ? savePorts() : ((B.edit = true), (B.stackOpen = true), render()); return;
+    case "save-ports": return savePorts();
+    case "port-reset": { const inp = $(`[data-port="${CSS.escape(d.id)}"]`); inp.value = I[d.id].defPort; return checkPort(inp); }
+    case "cf-free": { const i = I[d.id]; R.setPort(i.id, i.conflict.free); return R.app.start(i.id); }
+    case "cf-edit": B.edit = true; B.stackOpen = true; render(); return setTimeout(() => { const inp = $(`[data-port="${CSS.escape(d.id)}"]`); inp?.focus(); inp?.select(); inp && checkPort(inp); }, 20);
+    case "cf-stop": { const i = I[d.id], h = i.conflict.holder; R.app.stop(h.id); return setTimeout(() => R.app.start(i.id), 800); }
+    case "adopt": { const chosen = R.detected(w).filter((x) => B.picks[w.id][x.app.name]); if (!chosen.length) return R.toast("Pick at least one app", { kind: "warn", icon: "ph-info" }); return R.adoptDetected(w, chosen); }
+    case "ai-prompt": return R.copy(aiPrompt(w), "AI prompt");
+    case "copy-json": { const st = R.stack(w); return R.copy(R.manifestJson(st.repo), "spawner.stack.json"); }
+    case "pr": return R.toast(`Opened ${d.url.replace("https://", "")}`, { icon: "ph-github-logo" });
+    case "t3": { const th = R.threadOf(w); return R.toast(`Opened “${th.title}” in T3 Code`, { icon: "ph-arrow-square-out" }); }
+    case "recent": B.recentOpen = !B.recentOpen; return render();
+    case "fold": B.stackOpen = !B.stackOpen; return render();
+    case "drawer": return app.classList.add("d-rail");
+    case "scrim": return app.classList.remove("d-rail");
+    case "theme": return R.toggleTheme();
+    case "nav": return R.toast(`${d.n}: as today`, { icon: "ph-info" });
+    case "src": return R.toast(d.s === "gh" ? (S.gh === "ok" ? "gh pr list --repo ublr/account|bill|cadence|cibi, every 60 s" : "gh not found: PRs come from T3 when it's there") : S.t3 === "ok" ? "t3 thread list --project C:\\umbler\\account, every 60 s. Links only." : "T3 not found. Review, stacks and logs work without it.", { icon: "ph-info", ms: 5000 });
+  }
+});
+document.addEventListener("keydown", (e) => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches(".task")) (e.preventDefault(), select(e.target.dataset.id));
+  if (e.key === "Enter" && e.target.matches("[data-port]")) savePorts();
+  if (e.key === "Escape" && B.edit) (B.edit = false, render());
+});
+document.addEventListener("input", (e) => {
+  if (e.target.matches("[data-port]")) checkPort(e.target);
+  if (e.target.matches("[data-pick]")) B.picks[B.sel][e.target.dataset.pick] = e.target.checked;
+});
+$("#tq").oninput = (e) => ((B.q = e.target.value), render());
+new ResizeObserver(() => render()).observe(app);
+
+/* ───────── demo panel: scenarios (not part of the design) ───────── */
+const SCEN = [["default", "1 · Default review"], ["run", "2 · Run stack from review"], ["nostack", "3 · No stack configured"], ["conflict", "4 · Port conflict"], ["t3off", "5 · T3 absent"], ["narrow", "6 · 720 × 560"]];
+const params = new URLSearchParams(location.hash.slice(1));
+const scen = params.get("s") || "default";
+function demo() {
+  const fab = document.createElement("button");
+  fab.className = "demo-fab";
+  fab.innerHTML = `<i class="ph ph-flask"></i>DEMO`;
+  fab.title = "Scenarios (not part of the design) · press ` to toggle";
+  const p = document.createElement("div");
+  p.className = "demo";
+  document.body.append(fab, p);
+  const draw = () => (p.innerHTML = `<h4>Scenarios</h4><div class="grid">${SCEN.map(([k, l]) => `<button data-s="${k}" aria-pressed="${scen === k}">${l}</button>`).join("")}</div>
+    <h4>Sources</h4><div class="grid"><button data-src="gh" aria-pressed="${S.gh === "ok"}">gh available</button><button data-src="t3" aria-pressed="${S.t3 === "ok"}">T3 available</button></div>
+    <h4>Agent via MCP</h4><div class="grid"><button data-mcp>AI: set port + start PAYMENT-10264</button></div>
+    <h4>View</h4><div class="grid"><button data-t>Toggle theme</button></div>
+    <p>Each scenario reloads the page into a known state. gh and T3 refresh every 60 s, one call per repo.</p>`);
+  draw();
+  fab.onclick = () => p.classList.toggle("on");
+  document.addEventListener("keydown", (e) => e.key === "`" && !/INPUT|TEXTAREA/.test(e.target.tagName) && p.classList.toggle("on"));
+  p.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.s) {
+      const q = new URLSearchParams(location.hash.slice(1));
+      q.set("s", b.dataset.s);
+      location.hash = q.toString();
+      return location.reload();
+    }
+    if (b.dataset.src) S[b.dataset.src] = S[b.dataset.src] === "ok" ? "missing" : "ok";
+    if ("mcp" in b.dataset) mcpRun();
+    if ("t" in b.dataset) R.toggleTheme();
+    draw();
+    render();
+  });
+}
+/** What an agent does over MCP: read the stack, move a port, start it, read logs. */
+async function mcpRun() {
+  const w = R.wt("t3-2a91c0de"), st = R.stack(w), aw = st.items[0];
+  select(w.id);
+  R.addLog(aw.id, "mcp", `hub_get_stack { worktree: "${w.label}" } → 3 apps · Account Web :${R.portOf(aw)} (default)`);
+  await R.sleep(700);
+  R.setPort(aw.id, R.freePort(5120, aw), "mcp");
+  await R.sleep(600);
+  R.addLog(aw.id, "mcp", `hub_start_stack { worktree: "${w.label}" }`);
+  R.startStack(w);
+}
+/* ───────── boot ───────── */
+if (params.get("theme")) document.documentElement.dataset.theme = params.get("theme");
+if (params.has("clean")) document.documentElement.classList.add("clean");
+if (scen === "narrow") document.documentElement.classList.add("narrow");
+if (scen === "t3off") S.t3 = "missing";
+if (scen === "nostack") B.sel = "PAYMENT-10301";
+if (scen === "conflict") {
+  // PAYMENT-10138 is already up on the repo defaults; PAYMENT-10264 inherits the same defaults.
+  for (const i of R.stack(R.wt("t3-8f4d95f7")).items) Object.assign(i, { state: "running", since: R.now() - 120_000, runPort: R.portOf(i) });
+  B.sel = "t3-2a91c0de";
+}
+demo();
+select(B.sel);
+if (scen === "run") setTimeout(() => $(`[data-a="row-run"][data-id="t3-8f4d95f7"]`)?.click(), 700);
+if (scen === "conflict") setTimeout(() => R.startStack(cur()), 600);
+</script>
+</body>
+</html>

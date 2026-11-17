@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A · Cockpit</title>
+<link rel="icon" href="kit/spawner.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<link rel="stylesheet" href="kit/kit.css">
+<style>
+/* A · Cockpit: today's layout (tree | merged log), plus a Work panel for the selected worktree. */
+.app { display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr) 344px; height: 100%; transition: grid-template-columns 0.5s var(--ease); }
+.app.nowork { grid-template-columns: var(--rail-w) minmax(0, 1fr) 0; }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+/* rail, as in hub.css */
+.rail { display: flex; flex-direction: column; min-height: 0; min-width: 0; padding: var(--pad); background: var(--bg-surface); border-right: 1px solid var(--border-default); }
+.rail-head { display: flex; align-items: center; gap: 4px; padding: 2px 2px 8px 6px; }
+.rail-head h1 { display: flex; align-items: center; gap: 8px; flex: 1; margin: 0; font: 600 13px/1.2 var(--font-ui); }
+.rail .field { margin-bottom: 8px; }
+.runbar { display: flex; align-items: center; gap: 2px; min-height: 28px; margin-bottom: 4px; padding: 0 2px 0 8px; }
+.runbar .cap.live { color: var(--ok); }
+.tree { flex: 1; overflow: auto; min-height: 0; margin: 0 -5px; padding: 0 5px 8px; }
+.wtg { margin-bottom: 4px; border-radius: var(--r); transition: background 0.3s, box-shadow 0.3s; }
+.wtg.cur { background: color-mix(in srgb, var(--accent) 6%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
+.wtg-h { display: flex; align-items: center; gap: 4px; min-height: 34px; padding: 2px 2px 2px 4px; border-radius: var(--r); cursor: pointer; }
+.wtg-h:hover { background: var(--hover-tint); }
+.caret { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; background: none; color: var(--text-tertiary); font-size: 11px; cursor: pointer; border-radius: 3px; transition: transform 0.4s var(--spring); }
+.caret:focus-visible { outline: 0; box-shadow: var(--ring); }
+.wtg.closed .caret { transform: rotate(-90deg); }
+.wtg-t { display: flex; flex-direction: column; flex: 1; min-width: 0; padding-left: 2px; }
+.wtg-t b { font: 600 13px/1.25 var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wtg-t span { font: 400 11.5px/1.3 var(--font-ui); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sum { flex: none; font: 500 10.5px/1 var(--font-mono); color: var(--text-secondary); padding: 3px 6px; border-radius: var(--r); background: var(--hover-tint); }
+.sum.live { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.sum.bad { color: var(--err); background: color-mix(in srgb, var(--err) 14%, transparent); }
+.t3line { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 6px 5px 30px; font: 500 11.5px var(--font-ui); }
+.t3line .th { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 6px 2px 2px; border: 0; border-radius: var(--r); background: none; color: var(--agent); cursor: pointer; font: inherit; }
+.t3line .th:hover { background: var(--agent-soft); }
+.t3line .th:focus-visible { outline: 0; box-shadow: var(--ring); }
+.t3line .th span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t3line .th.waiting { color: var(--warn); }
+.t3line .th.quiet { color: var(--text-tertiary); }
+.collapse { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 0.45s var(--ease), opacity 0.35s; }
+.collapse > .in { overflow: hidden; min-height: 0; }
+.wtg.closed .collapse { grid-template-rows: 0fr; opacity: 0; }
+.proj { margin: 2px 0 2px 14px; padding-left: 8px; border-left: 1px solid var(--border-default); }
+.proj-h { display: flex; align-items: center; gap: 6px; height: 24px; padding-left: 4px; }
+.proj-h .br { margin-left: auto; font: 400 11px var(--font-mono); color: var(--text-tertiary); text-transform: none; letter-spacing: 0; }
+.apps { list-style: none; margin: 0; padding: 0; }
+.app-row { position: relative; display: flex; align-items: center; gap: 10px; min-height: var(--row-h); padding: 4px 4px 4px 8px; border-radius: var(--r); transition: background var(--fast); }
+.app-row:hover { background: var(--hover-tint); }
+.app-row .meta { flex: 1; min-width: 0; }
+.app-row .nm { font: 500 13.5px/1.25 var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-row .sub { display: flex; gap: 4px; font: 400 11.5px/1.3 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; }
+.app-row .sub a { color: var(--text-secondary); text-decoration: none; }
+.app-row .sub a:hover { color: var(--accent-text); text-decoration: underline; }
+.app-row .sub .bad { color: var(--err); }
+.app-row .extra { display: flex; opacity: 0; transition: opacity 0.2s; }
+.app-row:hover .extra, .app-row:focus-within .extra { opacity: 1; }
+.roots { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--border-default); display: flex; align-items: center; gap: 4px; padding-left: 6px; }
+
+/* log column */
+.logv-bar { padding-right: var(--pad); }
+.workbtn { position: relative; }
+
+/* work panel */
+.work { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg-surface); border-left: 1px solid var(--border-default); }
+.work-h { flex: none; padding: 0 10px 8px 12px; border-bottom: 1px solid var(--border-default); }
+.work-top { display: flex; align-items: center; height: var(--bar-h); padding-right: 138px; }
+.work-t { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.work-t b { font: 600 14px var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.work-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--text-tertiary); font: 400 11.5px var(--font-mono); }
+.work-sub .acts { display: flex; gap: 6px; margin-left: auto; }
+.tlist { flex: none; max-height: 168px; overflow: auto; padding: 6px; border-bottom: 1px solid var(--border-default); }
+.tlist-h { display: flex; align-items: center; padding: 2px 4px 4px 6px; }
+.trow { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 4px 8px; border: 0; border-radius: var(--r); background: none; text-align: left; cursor: pointer; transition: background var(--fast); }
+.trow:hover { background: var(--hover-tint); }
+.trow:focus-visible { outline: 0; box-shadow: var(--ring); }
+.trow.cur { background: var(--sel-bg); }
+.trow .meta { flex: 1; min-width: 0; }
+.trow .nm { font: 500 12.5px/1.3 var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trow .sub { font: 400 11px/1.3 var(--font-mono); color: var(--text-tertiary); }
+.trow .sub.waiting { color: var(--warn); }
+.work .conv { min-height: 0; }
+.work-empty { padding: 18px 14px 6px; color: var(--text-secondary); font: 400 12.5px/1.5 var(--font-ui); }
+.work-empty b { display: block; margin-bottom: 4px; color: var(--text-primary); }
+.winctl { position: absolute; top: 0; right: 0; z-index: 30; display: flex; height: calc(var(--bar-h) - 1px); }
+.winctl span { display: grid; place-items: center; width: 46px; color: var(--text-secondary); font-size: 14px; }
+.scrim { position: absolute; inset: 0; z-index: 40; background: color-mix(in srgb, var(--bg-page) 60%, transparent); opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+
+/* folds: below 960 the rail and the work panel become drawers over the log */
+.side-t { display: none; }
+@container app (max-width: 959px) {
+  .app, .app.nowork { grid-template-columns: minmax(0, 1fr); }
+  .side-t { display: inline-grid; }
+  .rail, .work { position: absolute; z-index: 50; top: 0; bottom: 0; box-shadow: var(--shadow-pop); transition: transform 0.5s var(--ease); }
+  .rail { left: 0; width: min(320px, 86%); transform: translateX(-105%); }
+  .work { right: 0; width: min(360px, 92%); transform: translateX(105%); }
+  .app.d-rail .rail, .app.d-work .work { transform: none; }
+  .app.d-rail .scrim, .app.d-work .scrim { opacity: 1; pointer-events: auto; }
+  .work-top { padding-right: 4px; }
+  .logv-bar { padding-right: 140px; }
+}
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="app" id="app">
+    <aside class="rail" id="rail">
+      <div class="rail-head"><h1><img class="brand" src="kit/spawner.svg" alt="">Spawner</h1>
+        <button class="ib" data-k="t3-status" aria-label="T3 Code connection"><i class="ph ph-plugs-connected"></i></button>
+        <button class="ib" data-k="palette" aria-label="Command palette (Ctrl K)"><i class="ph ph-command"></i></button>
+        <button class="ib" data-k="theme" aria-label="Toggle theme"><i class="ph ph-moon"></i></button></div>
+      <label class="field"><i class="ph ph-funnel"></i><input id="wq" placeholder="Filter, or type running, failed, agent"></label>
+      <div class="runbar" id="runbar"></div>
+      <div class="tree" id="tree"></div>
+      <div class="roots"><span class="cap grow">Folders · 3</span><button class="ib sm" aria-label="Add folder"><i class="ph ph-folder-plus"></i></button></div>
+    </aside>
+    <div class="main">
+      <div id="alert"></div>
+      <div id="log" style="flex:1;min-height:0"></div>
+      <div class="status" id="status"></div>
+    </div>
+    <aside class="work" id="work" aria-label="Work"></aside>
+    <div class="scrim" data-a="scrim"></div>
+    <div class="winctl" aria-hidden="true"><span><i class="ph ph-minus"></i></span><span><i class="ph ph-square"></i></span><span><i class="ph ph-x"></i></span></div>
+  </div>
+</div>
+<script src="kit/kit.js"></script>
+<script>
+const { $, $$, esc, S, I, WTS, ui } = K;
+const A = { wt: "PAYMENT-9986", thread: {}, closed: new Set(["main"]), work: true, q: "" };
+const app = $("#app");
+
+/* log: the merged stream, as today */
+const log = new K.LogView($("#log"));
+const bar = $(".logv-bar", log.el);
+bar.insertAdjacentHTML("afterbegin", `<button class="ib side-t" data-a="drawer-rail" aria-label="Show sidebar"><i class="ph ph-sidebar-simple"></i></button>`);
+bar.insertAdjacentHTML("beforeend", `<span class="sep"></span><button class="ib workbtn" data-a="toggle-work" aria-label="Work panel" aria-pressed="true"><i class="ph ph-sidebar-simple" style="transform:scaleX(-1)"></i><span class="badge" id="wbadge" hidden></span></button>`);
+
+const narrow = () => app.clientWidth < 960;
+const sumOf = (w) => {
+  const run = w.ids.filter((id) => I[id].state === "running").length, bad = w.ids.filter((id) => I[id].state === "failed").length;
+  return bad ? `<span class="sum bad">${bad} failed</span>` : run ? `<span class="sum live">${run} running</span>` : "";
+};
+
+function t3Line(w) {
+  if (w.main) return "";
+  const t3 = K.t3For(w.id);
+  if (t3.kind === "unregistered") return `<div class="t3line"><button class="pill dashed" data-k="t3-add" data-wt="${w.id}" title="t3 project add ${esc(w.t3project)}">${S.adding === w.id ? '<span class="spin"><i class="ph ph-circle-notch"></i></span>adding…' : '<i class="ph ph-plus"></i>Add to T3'}</button></div>`;
+  const th = K.lead(w.id);
+  if (!th) return "";
+  const st = K.uiStatus(th);
+  const cls = st === "waiting" ? "waiting" : st === "settled" ? "quiet" : "";
+  return `<div class="t3line"><button class="th ${cls}" data-a="thread" data-id="${th.threadId}" title="${esc(th.title)} · ${ui.statusWord(st)}"><span class="ts ${st}"></span><span>${st === "waiting" ? "waiting for you · " : st === "completed" ? "your turn · " : ""}${esc(th.title)}</span></button>${ui.prChip(th)}</div>`;
+}
+function appRow(id) {
+  const i = I[id], st = i.state, live = K.active(st), port = K.portOf(i);
+  const sub = st === "failed" ? `<span class="bad">${esc(i.exit)}</span>` : `<span>${esc(i.kind)}</span>${port ? `<span>·</span><a href="#" data-k="open-port" data-id="${id}">:${port} ↗</a>` : ""}`;
+  return `<li class="app-row" data-state="${st}"><span class="dot"></span><div class="meta"><div class="nm">${esc(i.name)}</div><div class="sub">${sub}</div></div>
+    <span class="extra">${live ? `<button class="ib sm" data-k="restart" data-id="${id}" aria-label="Restart ${esc(i.name)}"><i class="ph ph-arrow-clockwise"></i></button>` : ""}${port && st === "running" ? `<button class="ib sm" data-k="open-port" data-id="${id}" aria-label="Open in browser"><i class="ph ph-globe"></i></button>` : ""}</span>
+    <button class="ib${live ? " danger" : ""}" data-k="${live ? "stop" : "start"}" data-id="${id}" aria-label="${live ? "Stop" : st === "failed" ? "Retry" : "Run"} ${esc(i.name)}" ${st === "stopping" ? "disabled" : ""}><i class="ph-fill ${live ? "ph-stop" : st === "failed" ? "ph-arrow-clockwise" : "ph-play"}"></i></button></li>`;
+}
+function renderRail() {
+  const q = A.q.toLowerCase();
+  const match = (w) => !q || (q === "running" ? w.ids.some((id) => I[id].state === "running") : q === "failed" ? w.ids.some((id) => I[id].state === "failed") : q === "agent" ? !!K.lead(w.id) && ["running", "waiting"].includes(K.uiStatus(K.lead(w.id))) : (w.label + w.branch + w.ids.map((id) => I[id].name).join()).toLowerCase().includes(q));
+  K.put($("#tree"), WTS.filter(match).map((w) => `<div class="wtg${A.closed.has(w.id) && !q ? " closed" : ""}${A.wt === w.id ? " cur" : ""}">
+    <div class="wtg-h" data-a="wt" data-id="${w.id}"><button class="caret" data-a="caret" data-id="${w.id}" aria-label="Expand or collapse ${esc(w.label)}"><i class="ph-bold ph-caret-down"></i></button>
+      <div class="wtg-t"><b>${esc(w.label)}</b><span>${w.projects.length} project${w.projects.length > 1 ? "s" : ""}${w.main ? "" : " · " + esc(w.branch)}</span></div>${sumOf(w)}</div>
+    ${t3Line(w)}
+    <div class="collapse"><div class="in">${w.projects.map((p) => `<div class="proj"><div class="proj-h"><span class="cap">${esc(p.repo)}</span>${w.main ? "" : `<span class="br">${esc(p.branch)}</span>`}</div><ul class="apps">${p.ids.map(appRow).join("")}</ul></div>`).join("")}</div></div></div>`).join("") || `<p class="muted" style="padding:12px 8px">No worktrees match.</p>`);
+  const run = Object.values(I).filter((i) => K.active(i.state)).length;
+  K.put($("#runbar"), `<span class="cap grow ${run ? "live" : ""}">${run ? run + " running" : "Nothing running"}</span><button class="ib sm" aria-label="Restart all"><i class="ph ph-arrow-clockwise"></i></button><button class="ib sm danger" aria-label="Stop all"><i class="ph ph-stop"></i></button>`);
+}
+
+function renderWork() {
+  const w = K.wt(A.wt), t3 = K.t3For(w.id);
+  const threads = K.threadsOf(w.id);
+  const cur = S.threads[A.thread[w.id]] && S.threads[A.thread[w.id]].wt === w.id ? A.thread[w.id] : threads[0]?.threadId;
+  const pr = threads.find((t) => t.pr);
+  const head = `<div class="work-h"><div class="work-top"><div class="work-t"><span class="cap">Work</span><b>${esc(w.label)}</b></div><span class="grow"></span><button class="ib sm side-t" data-a="toggle-work" aria-label="Close"><i class="ph ph-x"></i></button></div>
+    <div class="work-sub"><span>${esc(w.main ? "main" : w.branch)}</span>${pr ? ui.prChip(pr) : ""}<span class="acts">${w.t3project ? `<button class="btn btn-ghost sm" data-k="t3-open" data-wt="${w.id}" title="t3 app ${esc(w.t3project)}"><i class="ph ph-arrow-square-out"></i>Open in T3</button>` : ""}</span></div></div>`;
+  if (w.main) return K.put($("#work"), head + `<div class="work-empty"><b>Main checkouts aren't one task</b>Each repo here is its own T3 project. Open the one you need in T3, or pick a task worktree on the left to see its threads.</div>`);
+  const problem = ui.t3Problem(w.id);
+  const list = threads.length ? `<div class="tlist"><div class="tlist-h"><span class="cap grow">Threads · ${threads.length}</span>${t3.ok && !w.t3made ? `<button class="ib sm" data-a="new" aria-label="New thread"><i class="ph ph-plus"></i></button>` : ""}</div>${threads.map((t) => { const st = K.uiStatus(t); return `<button class="trow${t.threadId === cur ? " cur" : ""}" data-a="thread" data-id="${t.threadId}"><span class="ts ${st}${problem && t3.kind !== "unregistered" ? " stale" : ""}"></span><span class="meta"><span class="nm" style="display:block">${esc(t.title)}</span><span class="sub ${st}">${ui.statusWord(st)} · ${K.agoSpan(t.updatedAt)}</span></span></button>`; }).join("")}</div>` : "";
+  const body = A.newFor === w.id || !threads.length
+    ? `${threads.length ? "" : `<div class="work-empty"><b>No thread for ${esc(w.label)} yet</b>Start one here and it runs in <code>${esc(w.t3project)}</code>, the folder Spawner runs these apps from.</div>`}<div style="flex:1"></div>${ui.newThread(w.id)}`
+    : ui.conversation(cur);
+  K.put($("#work"), head + problem + list + `<div style="display:flex;flex-direction:column;flex:1;min-height:0">${body}</div>`);
+  const waiting = Object.values(S.threads).filter((t) => K.uiStatus(t) === "waiting").length;
+  const b = $("#wbadge");
+  b.hidden = !waiting;
+  b.textContent = waiting;
+}
+function render() {
+  renderRail();
+  renderWork();
+  K.put($("#status"), ui.statusBar());
+  K.put($("#alert"), ui.alertBar());
+  $(".workbtn").setAttribute("aria-pressed", narrow() ? app.classList.contains("d-work") : A.work);
+}
+K.on("render", render);
+
+function focusWt(id, { open = true } = {}) {
+  A.wt = id;
+  A.newFor = null;
+  A.closed.delete(id);
+  if (narrow() && open) setDrawer("work");
+  else if (!A.work) toggleWork();
+  render();
+}
+function focusThread(id) {
+  const th = S.threads[id];
+  if (!th) return;
+  A.thread[th.wt] = id;
+  focusWt(th.wt);
+}
+function setDrawer(d) {
+  app.classList.remove("d-rail", "d-work");
+  if (d) app.classList.add("d-" + d);
+}
+function toggleWork() {
+  if (narrow()) return setDrawer(app.classList.contains("d-work") ? null : "work");
+  A.work = !A.work;
+  app.classList.toggle("nowork", !A.work);
+  render();
+}
+K.on("focus-thread", focusThread);
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-a]");
+  if (!b) return;
+  const d = b.dataset;
+  if (d.a === "caret") { e.stopPropagation(); A.closed.has(d.id) ? A.closed.delete(d.id) : A.closed.add(d.id); return render(); }
+  if (d.a === "wt") return focusWt(d.id, { open: false });
+  if (d.a === "thread") { A.newFor = null; return focusThread(d.id); }
+  if (d.a === "new") { A.newFor = A.wt; render(); return setTimeout(() => $(`[data-newthread="${A.wt}"]`)?.focus(), 30); }
+  if (d.a === "toggle-work") return toggleWork();
+  if (d.a === "drawer-rail") return setDrawer("rail");
+  if (d.a === "scrim") return setDrawer(null);
+});
+$("#wq").oninput = (e) => ((A.q = e.target.value), render());
+K.on("thread-started", ({ id }) => focusThread(id));
+K.on("resize", () => (setDrawer(null), render()));
+K.palette.extra = () => [
+  ...WTS.map((w) => ({ g: "Go to", icon: "ph-git-branch", label: `Worktree ${w.label}`, run: () => focusWt(w.id) })),
+  { g: "View", icon: "ph-sidebar-simple", label: "Toggle work panel", run: toggleWork },
+];
+render();
+K.boot({
+  focusWt, focusThread,
+  selectRefund: () => log.selectWhere((l) => l.inst === K.ID.api && (/rf_8851/.test(l.text) || l.text.startsWith("   at Cadence"))),
+  morning: () => location.replace(location.pathname),
+  day: () => { focusWt("docs-search"); K.app.start(K.ID.docs); },
+});
+</script>
+</body>
+</html>
