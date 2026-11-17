@@ -7,7 +7,8 @@ export interface ReviewFacts {
   /** Colour class of the pull-request icon. */
   icon: "pr-ok" | "pr-warn" | "pr-bad" | "pr-draft";
   text: string;
-  checks: { cls: "ok" | "warn" | "bad" | "mute"; text: string } | null;
+  /** `text` says it in full for the PR strip; `short` fits the rail row, with `text` as its tooltip. */
+  checks: { cls: "ok" | "warn" | "bad" | "mute"; icon: string; text: string; short: string } | null;
 }
 
 /**
@@ -16,9 +17,18 @@ export interface ReviewFacts {
  */
 export function reviewOf(pr: Pr): ReviewFacts {
   const c = pr.checks;
-  const failing = { cls: "bad" as const, text: `${c.fail} failing: ${c.failing.join(", ")}` };
-  const pending = { cls: "mute" as const, text: `${c.pending} check${c.pending === 1 ? "" : "s"} running` };
-  const checks = c.fail ? failing : c.pending ? pending : { cls: "ok" as const, text: `${c.pass}/${c.pass} checks passed` };
+  const failing = { cls: "bad" as const, icon: "ph-x", text: `${c.fail} failing: ${c.failing.join(", ")}`, short: `${c.fail} failing` };
+  const pending = {
+    cls: "mute" as const,
+    icon: "ph-circle-dashed",
+    text: `${c.pending} check${c.pending === 1 ? "" : "s"} running`,
+    // "running" would read as apps running on a rail row that also shows app state.
+    short: `${c.pending} pending`,
+  };
+  // Many repos have no CI at all; "0/0 checks passed" in green would claim a pass that never ran.
+  const none = { cls: "mute" as const, icon: "ph-minus", text: "no checks yet", short: "no checks" };
+  const passed = { cls: "ok" as const, icon: "ph-check", text: `${c.pass}/${c.pass} checks passed`, short: `${c.pass}/${c.pass} passed` };
+  const checks = c.fail ? failing : c.pending ? pending : c.pass ? passed : none;
   if (pr.draft) return { cls: "mute", icon: "pr-draft", text: "Draft", checks: c.pending ? pending : null };
   if (pr.review === "changes") return { cls: "warn", icon: "pr-warn", text: "Changes requested", checks };
   if (c.fail) return { cls: "bad", icon: "pr-bad", text: "Checks failing", checks };

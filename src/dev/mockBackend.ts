@@ -227,6 +227,18 @@ const PRS: Pr[] = [
     url: "https://github.com/ublr/account/pull/1736",
     checks: { pass: 13, fail: 1, pending: 0, failing: ["build-and-test"] },
   },
+  // The same task's Bill side: a second PR on one worktree, in a repo with no CI, as most of the real ones are.
+  {
+    repo: "bill",
+    slug: "ublr/bill",
+    number: 412,
+    title: "Expose the webhook retry budget on the Bill API",
+    head: "PAYMENT-10277",
+    draft: false,
+    review: "pending",
+    url: "https://github.com/ublr/bill/pull/412",
+    checks: { pass: 0, fail: 0, pending: 0, failing: [] },
+  },
   {
     repo: "account",
     slug: "ublr/account",

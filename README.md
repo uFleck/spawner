@@ -95,9 +95,37 @@ A folder can be:
 
 Group ids stay as they are (`PAYMENT-9986`, `main`) unless two folders produce the same id, in which case each is prefixed with its folder path. A project reachable from two overlapping folders is listed once.
 
+## Stacks and ports
+
+A worktree with an open PR is listed first in the sidebar (**In review**, read from `gh pr list`), and opening a worktree shows its stack: the apps a reviewer needs to run and test the branch. A repo declares it in `spawner.stack.json` at its root, committed like any other file:
+
+```json
+{
+  "name": "Account + Bill",
+  "apps": [
+    {
+      "repo": "account",
+      "app": "Acme.Account.Admin.Server",
+      "port": 5104,
+      "scheme": "https",
+      "env": { "BillApi__BaseUrl": "http://localhost:{port:Bill API}" }
+    },
+    { "repo": "bill", "app": "Bill API", "port": 42318 }
+  ],
+  "open": ["Acme.Account.Admin.Server"]
+}
+```
+
+- `repo` is the repo's folder name. An app from a repo the worktree does not hold runs from that repo's main checkout, shared with other worktrees.
+- `port` is the repo default. Changing a port in the window (Edit ports) or with `hub_set_port` saves an override for that one checkout in `ports.json` in the app data directory; it is never written to the manifest or committed.
+- `env` links apps: `{port:<app name>}` is the other app's resolved port, `{port}` the app's own, `{cwd}` its folder, so a moved port follows. An unknown name is an error at start.
+- Only `iis-express`, `dotnet-run`, `vite`, `next`, `react` and `node` services take a port. Tauri apps, scripts and tasks cannot; leave `port` out for them.
+
+A repo without a manifest shows the apps Spawner detected; **Use detected apps** writes the ones you keep to `spawner.stack.json`, and **Copy AI prompt** hands an agent the schema to write it.
+
 ## UI in a browser
 
-`pnpm dev` outside Tauri installs `src/dev/mockBackend.ts`: groups from a real scan, simulated run/stop and log output. It is not part of the production bundle.
+`pnpm dev` outside Tauri installs `src/dev/mockBackend.ts`: groups from a real scan, simulated run/stop and log output. It is not part of the production bundle. `?s=review|conflict|nostack|nogh` picks a scenario and `?worktree=<id>` opens a worktree on load.
 
 ## MCP server
 
@@ -122,6 +150,10 @@ The status bar shows the port, and clicking it opens the setup guide. The guide 
 | `hub_list_presets` | The presets saved in the window, with the worktrees each can run in and how its apps resolve in its default worktree. |
 | `hub_start_preset` | Starts every app of a preset concurrently, in its own worktree or the `worktree` given. Apps whose repo the worktree lacks run from main, as in the window. |
 | `hub_stop_preset` | Stops the active apps of a preset. |
+| `hub_get_stack` | A worktree's stack resolved for its checkout: each app's repo, checkout (`worktree`, or `main` when shared), port and `port_source`, default port, URL and linked env. Without a manifest, `detected` lists the service apps that could make one. |
+| `hub_set_port` | Saves one stack app's port as an override for that checkout (`port: null` clears it). Refused for kinds that cannot take a port. |
+| `hub_start_stack` | Starts every service app of the stack concurrently with the saved ports and linked env, reusing running ones; one app's failure does not stop the others. |
+| `hub_stop_stack` | Stops the stack's running apps. `keep_shared` (default true) leaves the apps that run from a main checkout. |
 
 An app is selected by `app` (plus `worktree` or `repo` when the name is ambiguous), by `path` (the agent's working directory), or by `instance`. Log levels are read in the backend (`level.rs`) from .NET console, NLog and MSBuild formats and from the common markers of npm, node, vite, tsc, cargo and python, and an indented line takes the level of the entry above it unless it states its own.
 

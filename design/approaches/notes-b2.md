@@ -4,6 +4,8 @@ Mockup: `b2-review.html` (simulated backend in `kit/review.js`, styles from `kit
 
 B2 answers one question in one click: *what do I run to test this PR?* The rail lists worktrees with open PRs first, each with **Run stack**. The workspace shows the selected worktree's stack (apps, ports, run/stop) above its scoped logs. T3 Code is where conversations happen. Spawner only links to it.
 
+**Built on `b2-cockpit`:** slices 1–5 below. The T3 link (slice 6, the `T3` tag, Open in T3 and the gh → T3 fallback) is not built: PRs come from gh only, and when gh fails the rail says "PRs unavailable" with the reason. The contract the code follows is `impl-b2.md`.
+
 ## What changed from B
 
 | B (round 1) | B2 |
@@ -14,7 +16,7 @@ B2 answers one question in one click: *what do I run to test this PR?* The rail 
 | Thread status polling every 3 s, "waiting for you" toasts | Removed. gh and T3 are each read once per repo every 60 s. |
 | Apps strip with Start all / Stop all | A **stack** card from a committed manifest, with ports (default or override), conflicts inline, and Run/Stop stack. |
 | T3 project per worktree (`t3project`, "not in T3") | None. T3 keeps one project per repo, and Spawner never registers anything. |
-| "All apps & logs" view | Not mocked. Keep it as a footer row next to Folders and Scripts (see open questions). |
+| "All apps & logs" view | Kept as a folded row under the rail sections; a worktree's log toolbar has an **All logs** way out. |
 
 ## Data model
 
@@ -60,7 +62,7 @@ type PortOverrides = Record<string /* `${project path}::${app id}` */, number>;
 - **Cache:** 60 s per repo. Refresh on window focus if the data is older than 60 s. While the window is hidden, stop polling, except to keep the companion window current.
 - **Backoff on failure:** 60 → 120 → 240 s, capped at 10 min. Keep the last good data and show its age ("via gh · 4 min ago").
 - **Fallback chain:** gh → T3 `pullRequests` (number, url, state, no review data; the row says "review state needs gh") → no In review section. Stacks, logs and the rest keep working.
-- `gh auth status` failing has its own state in the status bar: "gh not signed in".
+- A gh that is missing or not signed in shows in the rail's In review section ("PRs unavailable" and gh's message), not in the status bar.
 
 ## T3 integration (read-only)
 
@@ -171,13 +173,12 @@ Each slice ships into today's sidebar and works on its own.
 - **headRefName from forks.** A fork PR whose branch name matches a local branch would map to the wrong worktree. Match on `headRepositoryOwner` too.
 - **T3 output shape.** It is assumed from the brief: `list` has `pullRequests`, `show` has `branch` and `worktreePath`. If `list` ever includes those fields, drop the `show` calls.
 
-## Where the real backend can't support this yet
+## What the backend gained, and what it still can't do
 
-- `StepSpec` has no `env`, so Node apps that read `PORT` can't take an override.
-- `dotnet-run` apps carry no port, so there is nothing to show or check until the manifest gives one.
-- No override store, no gh client, no stack parser, no stack MCP tools.
-- Tauri dev ports can't be moved without also changing the frontend's port. Not overridable in v1.
-- The runner learns a port from output only when `port` is unset. With an override set, keep `learn_port` off and trust the passed port.
+- Built: `StepSpec.env`, the `ports.json` override store, the gh client (`open_prs`, repos in parallel, partial errors), the stack parser with `env` and `{port:<app>}` (the linked-ports risk above is settled this way), and the four stack MCP tools.
+- `dotnet-run` apps carry no port until the manifest gives one; the card then says "port at start".
+- Tauri dev ports, scripts and tasks cannot take a port, since moving a Tauri port means moving the frontend's too. The card says "no port".
+- With an override set, `learn_port` is off and the passed port is trusted.
 
 ## What not to build
 
@@ -196,7 +197,11 @@ Each slice ships into today's sidebar and works on its own.
 
 ## How it was checked
 
-`b2-review.html` was served over http (`python -m http.server`) and run in headless Chromium (`chrome-headless-shell` 1208) with a script that clicks through every scenario:
+**The implementation** (`b2-cockpit`): `cargo test` (161 passed, 9 ignored) and `npm run build`. A smoke test against the real backend on this machine: the scan (15 groups), `open_prs` (66 real open PRs across 12 repos in 2.8 s, with partial errors), a real `spawner.stack.json` resolved with `{port}` and `{port:<app>}`, a `set_port` override, and `start_stack` / `stop_stack` on a scratch Node app that answered on 5391, then on 5392 after the override (proving `PORT` and `env`). The window ran at 1280 × 800 on real data (`shots/impl/real-workspace.png`). The polish pass drove the mock UI in headless Chromium over CDP at 1280 × 800 and 720 × 560, light and dark, with a clean console (`shots/polish/`).
+
+Real data differs from the mockup in three ways. Most real PRs have no CI, so the strip says "no checks yet" instead of a pass count. Many worktrees have no manifest yet, so the no-stack card is the common case and not an edge case. And a task can be a main checkout on the task branch (for example `C:/umbler/account` on PAYMENT-10277), which is why the header shows the checkout path.
+
+**The mockup:** `b2-review.html` was served over http (`python -m http.server`) and run in headless Chromium (`chrome-headless-shell` 1208) with a script that clicks through every scenario:
 
 - the default review in dark and light
 - review row → Run stack → building → running → Open (toast `https://localhost:5104`) → Stop stack → idle

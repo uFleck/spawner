@@ -12,6 +12,7 @@ import { StatusBar } from "./components/StatusBar";
 import { TooltipHost } from "./components/TooltipHost";
 import { WindowControls } from "./components/WindowControls";
 import { WorktreeView } from "./components/WorktreeView";
+import { scopeIds } from "./review";
 import { useSpawnerTheme } from "./spawnerTheme";
 import { actions, indexInstances, initStore, useSnapshot } from "./store";
 import "./styles/hub.css";
@@ -90,9 +91,11 @@ export default function App() {
   }, []);
 
   // A worktree shows a different set of apps, so a focus or a solo taken in the merged view would hide all of its logs.
+  // On a narrow window the drawer covers the workspace, so picking a worktree (or All logs) closes it to show the result.
   useEffect(() => {
     setHidden(new Set());
     setSelected(null);
+    setDrawer(false);
   }, [snap.selectedWorktree]);
 
   // Dev only: `?worktree=<id>` opens a worktree on load, so the mock's states can be linked to and screenshotted.
@@ -202,6 +205,12 @@ export default function App() {
 
   // The selected worktree is the whole workspace; without one, today's merged log view stays exactly as it was.
   const worktree = snap.selectedWorktree ? (snap.groups.find((g) => g.id === snap.selectedWorktree) ?? null) : null;
+  const worktreeStack = worktree ? (snap.stacks[worktree.id] ?? (snap.stackFor === worktree.id ? snap.stack : null)) : null;
+  // The status bar counts the lines the workspace shows, so its "1 err" is one the user can find below.
+  const scope = useMemo(
+    () => (worktree ? { label: worktree.label, ids: new Set(scopeIds(worktree, worktreeStack)) } : null),
+    [worktree, worktreeStack],
+  );
   const logProps = {
     snap,
     hidden,
@@ -253,7 +262,7 @@ export default function App() {
         ) : (
           <LogPane {...logProps} />
         )}
-        <StatusBar snap={snap} follow={follow} onGuide={() => setGuide(true)} />
+        <StatusBar snap={snap} follow={follow} scope={scope} onGuide={() => setGuide(true)} />
       </div>
       <div className="scrim" onClick={() => setDrawer(false)} />
       <WindowControls />

@@ -486,7 +486,7 @@ button { font: inherit; color: inherit; }
 .status .live { color: var(--ok); transition: color 0.3s; }
 .status .live.off { color: var(--text-tertiary); }
 .status .live i { font-size: 8px; }
-.status .mcp { display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 6px; border: 0; border-radius: var(--r); background: transparent; color: var(--text-tertiary); font: inherit; cursor: pointer; transition: background var(--fast), color var(--fast); }
+.status .mcp { display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 6px; border: 0; border-radius: var(--r); background: transparent; color: var(--text-tertiary); font: inherit; white-space: nowrap; cursor: pointer; transition: background var(--fast), color var(--fast); }
 .status .mcp:hover { background: var(--hover-tint); color: var(--text-primary); }
 .status .mcp.bad { color: var(--err); }
 .status .mcp.warn { color: var(--warn); }
@@ -840,34 +840,37 @@ button { font: inherit; color: inherit; }
 }
 .wt-note i { flex: none; margin-top: 2px; color: var(--warn); }
 
+/* Row 1 is the worktree and its one control; the PR title and the state line below get the full width, so a long
+   title ellipsizes once and the Run/Stop button keeps its place whatever the text does. */
 .wt-row {
-  display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 2px 8px; align-items: center;
+  display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 1px 8px; align-items: center;
   padding: 6px; margin-bottom: 1px; border-radius: var(--r); cursor: pointer;
   transition: background var(--fast);
 }
 .wt-row:hover { background: var(--hover-tint); }
 .wt-row.cur { background: var(--sel-bg); box-shadow: inset 2px 0 0 var(--accent); }
-.wt-row:focus-visible { outline: 0; box-shadow: var(--ring); }
+.app .rail .wt-row:focus-visible { outline: 0; box-shadow: var(--ring); }
+.app .rail .wt-row.cur:focus-visible { box-shadow: inset 2px 0 0 var(--accent), var(--ring); }
 .wt-g { grid-row: 1; display: grid; place-items: center; font-size: 15px; color: var(--text-tertiary); }
 .wt-t {
-  display: flex; align-items: center; gap: 6px; min-width: 0;
+  display: flex; align-items: baseline; gap: 6px; min-width: 0;
   font: 600 12.5px/1.3 var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.wt-num { font: 500 10.5px var(--font-mono); color: var(--text-tertiary); }
-.wt-r { grid-row: 1 / span 2; grid-column: 3; display: flex; align-items: center; gap: 6px; }
+.wt-num { flex: none; font: 500 10.5px var(--font-mono); color: var(--text-tertiary); }
+.wt-r { grid-row: 1; grid-column: 3; display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .wt-s {
-  grid-column: 2; min-width: 0;
+  grid-column: 2 / -1; min-width: 0;
   font: 500 12px/1.35 var(--font-ui); color: var(--text-secondary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .wt-row:not(.review) .wt-s { font: 400 11px/1.4 var(--font-mono); color: var(--text-tertiary); }
 .wt-m {
-  grid-column: 2 / span 2; display: flex; align-items: center; gap: 8px; min-width: 0;
+  grid-column: 2 / -1; display: flex; align-items: center; gap: 8px; min-width: 0;
   font: 400 10.5px/1.4 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; overflow: hidden;
 }
 .wt-m > * { flex: none; }
-.wt-m .wt-dim { overflow: hidden; text-overflow: ellipsis; }
-.wt-m .wt-repos { padding-left: 8px; border-left: 1px solid var(--border-default); }
+.wt-m .rs i { font-size: 10px; }
+.wt-m .wt-repos { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding-left: 8px; border-left: 1px solid var(--border-default); }
 .rs { display: inline-flex; align-items: center; gap: 4px; font: 500 11px var(--font-ui); white-space: nowrap; }
 .rs.ok { color: var(--ok); }
 .rs.warn { color: var(--warn); }
@@ -879,6 +882,8 @@ button { font: inherit; color: inherit; }
 .pr-draft { color: var(--text-tertiary); }
 .dots { display: flex; align-items: center; gap: 3px; }
 .dots .dot { width: 6px; height: 6px; }
+/* Run stack, Stop and "no stack" share one width, so the slot never resizes the title beside it. */
+.runbtn, .wt-nostack { min-width: 84px; justify-content: center; }
 .runbtn {
   display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px 0 7px;
   border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--bg-page); color: var(--text-primary);
@@ -888,12 +893,16 @@ button { font: inherit; color: inherit; }
 .runbtn i { color: var(--accent); }
 .runbtn:hover { border-color: var(--accent); }
 .runbtn:active { transform: scale(0.95); }
-.runbtn:focus-visible { outline: 0; box-shadow: var(--ring); }
+.app .rail .runbtn:focus-visible, .app .rail .wt-sec-h.as-btn:focus-visible { outline: 0; box-shadow: var(--ring); }
 .runbtn:disabled { opacity: 0.5; pointer-events: none; }
 .runbtn.stop i { color: var(--err); }
 .runbtn.stop:hover { border-color: var(--err); }
-.wt-nostack { font: 400 10.5px var(--font-mono); color: var(--text-tertiary); }
-@container rl (max-width: 265px) { .runbtn .lbl { display: none; } .runbtn { padding: 0 6px; } }
+.wt-nostack {
+  display: inline-flex; align-items: center; height: 22px; padding: 0 6px;
+  border: 1px dashed var(--border-strong); border-radius: var(--r);
+  font: 500 10.5px var(--font-mono); color: var(--text-tertiary); white-space: nowrap;
+}
+@container rl (max-width: 265px) { .runbtn .lbl { display: none; } .runbtn, .wt-nostack { min-width: 0; padding: 0 6px; } }
 
 /* the existing tree, folded away under one row */
 .allapps { margin-top: 6px; padding-top: 4px; border-top: 1px dashed var(--border-strong); }
@@ -919,15 +928,19 @@ button { font: inherit; color: inherit; }
   color: var(--text-tertiary); font: 400 11.5px var(--font-mono); white-space: nowrap;
 }
 .ws-meta .sub span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ws-meta .sub .repos { flex: none; }
+/* A long checkout path keeps its tail (the folder that tells checkouts apart) and loses its head. */
+.ws-meta .sub .path { direction: rtl; text-align: left; opacity: 0.8; }
 .ws-meta .acts { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
 .ws .pill {
-  display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px;
-  border: 1px solid var(--border-default); border-radius: var(--r); font: 500 11px var(--font-ui); white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 5px; flex: none; height: 22px; padding: 0 8px;
+  border: 1px solid var(--border-default); border-radius: var(--r); font: 600 11.5px var(--font-mono); white-space: nowrap;
 }
-.ws .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border-default)); }
-.ws .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--border-default)); }
-.ws .pill.bad { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, var(--border-default)); }
-.ws .pill.mute { color: var(--text-tertiary); }
+.ws .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border-default)); background: color-mix(in srgb, var(--ok) 8%, transparent); }
+.ws .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--border-default)); background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.ws .pill.bad { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, var(--border-default)); background: color-mix(in srgb, var(--err) 8%, transparent); }
+.ws .pill.mute { color: var(--text-secondary); }
+.ws .pill.mute i { color: inherit; }
 
 .prs { flex: none; background: var(--bg-surface); border-bottom: 1px solid var(--border-default); }
 .prl {
@@ -951,7 +964,7 @@ button { font: inherit; color: inherit; }
 .st-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 13px var(--font-ui); }
 .st-from { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font: 400 11px var(--font-mono); }
 .st-sum { flex: none; color: var(--text-secondary); font: 500 11px var(--font-mono); white-space: nowrap; }
-.st-apps { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 8px; align-items: start; margin: 0; padding: 0; }
+.st-apps { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 8px; align-items: start; margin: 0; padding: 0; }
 .st-app {
   position: relative; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 2px 10px; align-items: start;
   padding: 8px 8px 8px 12px; border: 1px solid var(--border-default); border-radius: var(--r); background: var(--bg-surface);
@@ -967,20 +980,27 @@ button { font: inherit; color: inherit; }
   font: 400 11px/1.4 var(--font-mono); white-space: nowrap; overflow: hidden;
 }
 .st-app .sub > span { flex: none; }
-.st-app .acts { display: flex; align-items: center; gap: 2px; }
+.st-app .acts { display: grid; grid-template-columns: 70px 60px 26px; align-items: center; gap: 2px 4px; }
 .st-app .bar { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; overflow: hidden; border-radius: 0 0 var(--r) var(--r); opacity: 0; transition: opacity 0.3s; }
 .st-app[data-state="building"] .bar, .st-app[data-state="starting"] .bar { opacity: 1; }
 .st-app .bar i { display: block; width: 40%; height: 100%; background: var(--warn); animation: st-slide 1.1s ease-in-out infinite; }
 @keyframes st-slide { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
 .port {
-  display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 2px 0 6px; border-radius: var(--r);
-  background: var(--hover-tint); color: var(--text-primary); text-decoration: none;
-  font: 500 11.5px var(--font-mono); white-space: nowrap;
+  display: inline-flex; align-items: center; justify-content: space-between; gap: 2px; height: 22px; padding: 0 4px 0 6px;
+  border-radius: var(--r); background: var(--hover-tint); color: var(--text-primary); text-decoration: none;
+  font: 600 12px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap;
 }
+.port i { font-size: 11px; color: var(--text-tertiary); }
 a.port:hover { background: var(--accent-soft); color: var(--accent-text); }
-.port .tag { padding: 0 5px; border-radius: 3px; font: 500 10px/16px var(--font-mono); color: var(--text-tertiary); }
-.port .tag.ov { background: var(--accent-soft); color: var(--accent-text); }
-.port.none { background: none; padding: 0; color: var(--text-tertiary); font-size: 10.5px; }
+a.port:hover i { color: inherit; }
+a.port:focus-visible { outline: 0; box-shadow: var(--ring); }
+/* default reads as a quiet outline; override is filled, so a moved port is spotted across the card at once */
+.st-app .tag {
+  display: inline-grid; place-items: center; height: 18px; border: 1px solid var(--border-default); border-radius: 3px;
+  font: 500 10px var(--font-mono); color: var(--text-tertiary);
+}
+.st-app .tag.ov { border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+.port.none { grid-column: span 2; justify-content: flex-end; background: none; padding: 0 4px 0 0; color: var(--text-tertiary); font: 400 10.5px var(--font-mono); }
 .stale { color: var(--warn); font: 500 10.5px var(--font-mono); }
 
 .st-app .edit { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
@@ -993,13 +1013,16 @@ a.port:hover { background: var(--accent-soft); color: var(--accent-text); }
 .st-app .edit .btn { height: 24px; padding: 0 8px; font-size: 11px; gap: 5px; }
 .st-app .edit .hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font: 400 10.5px var(--font-ui); }
 .st-app .edit .hint.bad { color: var(--err); }
+.st-app .edit .hint.dirty { color: var(--accent-text); font-weight: 500; }
 
+/* The conflict stays inside its card and wraps its two actions beside the message when there is room, so a busy port
+   adds one or two lines, not a block that pushes the other apps away. */
 .st-app .cf {
-  grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px;
+  grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 6px; padding-top: 6px;
   border-top: 1px dashed color-mix(in srgb, var(--err) 40%, transparent);
   color: var(--err); font: 500 11.5px/1.4 var(--font-ui);
 }
-.st-app .cf span { flex: 1 1 100%; }
+.st-app .cf span { flex: 1 1 220px; }
 .st-app .cf b { font-family: var(--font-mono); font-weight: 600; }
 .st-app .cf .btn { height: 24px; padding: 0 8px; font-size: 11px; border-color: currentColor; }
 
@@ -1018,32 +1041,67 @@ a.port:hover { background: var(--accent-soft); color: var(--accent-text); }
 .nostack p { margin: 0; max-width: 760px; color: var(--text-secondary); font: 400 12px/1.5 var(--font-ui); }
 .nostack code { font: 500 11px var(--font-mono); color: var(--text-primary); }
 .nostack > div { grid-column: 2; min-width: 0; }
-.picks2 { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
-.pk { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px 0 8px; border: 1px solid var(--border-default); border-radius: var(--r); font: 500 12px var(--font-ui); }
-.pk:has(input:checked) { border-color: var(--accent); background: var(--sel-bg); }
-.pk input { margin: 0; accent-color: var(--accent); }
-.pk small { color: var(--text-tertiary); font: 400 10.5px var(--font-mono); }
-.nostack .row2 { display: flex; gap: 8px; margin-top: 6px; }
+.picks2 { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 6px; }
+/* Ticked chips stay neutral, so the green button below is the one primary thing on the card. */
+.pk {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-width: 0; height: 28px; padding: 0 10px 0 8px;
+  border: 1px solid var(--border-default); border-radius: var(--r); background: var(--bg-surface);
+  font: 500 12px var(--font-ui); white-space: nowrap; cursor: pointer; transition: border-color var(--fast);
+}
+.pk:hover { border-color: var(--border-strong); }
+.pk:has(input:checked) { border-color: var(--border-strong); }
+.pk:not(:has(input:checked)) .nm { color: var(--text-tertiary); text-decoration: line-through; }
+.pk:has(input:focus-visible) { border-color: var(--accent); box-shadow: var(--ring); }
+.pk input { flex: none; width: 14px; height: 14px; margin: 0; accent-color: var(--accent); outline: 0; }
+.pk .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pk small { flex: none; color: var(--text-tertiary); font: 400 10.5px var(--font-mono); }
+.nostack .row2 { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .muted { color: var(--text-tertiary); }
 
 /* the log pane says which worktree it is scoped to, and how to leave */
-.scope-t {
-  display: inline-flex; align-items: center; gap: 6px; flex: none; max-width: 240px; height: var(--ctl); padding: 0 8px;
-  border-radius: var(--r); background: var(--hover-tint); color: var(--text-secondary);
-  font: 500 11.5px var(--font-mono); white-space: nowrap; overflow: hidden;
+/* One joined control: the scope it filters to, and the way out, like a filter chip with its clear button. */
+.scope {
+  display: inline-flex; align-items: stretch; flex: 0 1 auto; min-width: 0; height: var(--ctl);
+  border: 1px solid var(--border-default); border-radius: var(--r); overflow: hidden;
 }
-.scope-all { flex: none; }
+.scope-t {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 220px; padding: 0 8px;
+  background: var(--hover-tint); color: var(--text-secondary); font: 500 11.5px var(--font-mono); white-space: nowrap;
+}
+.scope-t i { flex: none; color: var(--accent-text); }
+.scope-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.scope-all {
+  display: inline-flex; align-items: center; gap: 6px; flex: none; padding: 0 10px 0 8px; border: 0;
+  border-left: 1px solid var(--border-default); background: transparent; color: var(--text-primary);
+  font: 600 12px var(--font-ui); white-space: nowrap; cursor: pointer; transition: background var(--fast);
+}
+.scope-all i { font-size: 11px; color: var(--text-tertiary); }
+.scope-all:hover { background: var(--hover-tint); }
+.scope-all:focus-visible { outline: 0; box-shadow: inset 0 0 0 2px var(--accent); }
+@media (max-width: 720px) { .scope-all .lbl { display: none; } .scope-all { padding: 0 8px; } }
 
-/* narrow: the workspace stacks, and nothing scrolls sideways */
+.st-fold { display: none; }
+.st-fold i { transition: transform 0.3s var(--spring); }
+.st-fold[aria-expanded="false"] i { transform: rotate(-90deg); }
+
+/* narrow: the workspace stacks, the stack folds to one line, and nothing scrolls sideways */
 @media (max-width: 959px) {
   .ws-h { padding-left: 4px; }
   .ws-top h2 { font-size: 14px; }
   .ws-meta { flex-wrap: wrap; row-gap: 6px; }
-  .ws-meta .acts { margin-left: 0; }
+  .ws-meta .sub .path { display: none; }
   .prl { flex-wrap: wrap; padding: 6px 10px; row-gap: 2px; }
   .prl .via { display: none; }
   .stack { padding: 8px 10px; }
-  .st-h { flex-wrap: wrap; row-gap: 4px; }
+  .stack.folded:not(.has-cf) .st-h { padding-bottom: 0; }
+  .stack.folded:not(.has-cf) .st-apps, .stack.folded .st-missing, .stack.folded .st-app:not([data-conflict]) { display: none; }
+  .status { gap: 12px; }
+  .status .mcp .lbl { display: none; }
+  .st-fold { display: inline-grid; }
+  .st-h .st-from { display: none; }
   .st-apps { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .ws-meta .acts .lbl, .st-h .lbl { display: none; }
 }
 

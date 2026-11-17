@@ -23,7 +23,12 @@ interface Row {
 function StackButton({ group, snap, live }: { group: Group; snap: Snapshot; live: boolean }) {
   const stack = snap.stacks[group.id];
   // Once the stack is known to be missing, the row says so instead of offering a start that cannot work.
-  if (stack && !stack.source) return <span className="wt-nostack">no stack</span>;
+  if (stack && !stack.source)
+    return (
+      <span className="wt-nostack" title="No spawner.stack.json yet: open the worktree to set one up">
+        no stack
+      </span>
+    );
   if (live)
     return (
       <button
@@ -111,7 +116,6 @@ function Row({
         {pr ? <span className="wt-num">#{pr.number}</span> : null}
       </span>
       <span className="wt-r">
-        {live ? <Dots ids={ids} snap={snap} /> : null}
         <StackButton group={group} snap={snap} live={live} />
       </span>
       {pr && facts ? (
@@ -120,14 +124,20 @@ function Row({
             {pr.title}
           </span>
           <span className="wt-m">
+            {/* The dots sit on the state line, not beside the button, so the worktree name keeps its room. */}
+            {live ? <Dots ids={ids} snap={snap} /> : null}
             <span className={`rs ${facts.cls}`}>{facts.text}</span>
             {facts.checks ? (
               <span className={`rs ${facts.checks.cls}`} title={facts.checks.text}>
-                {facts.checks.text}
+                <i className={`ph-bold ${facts.checks.icon}`} />
+                {facts.checks.short}
               </span>
             ) : null}
-            <span className="wt-dim wt-repos">{repos}</span>
-            {apps ? <span className="wt-dim">{apps} apps</span> : null}
+            {prs.length > 1 ? <span className="wt-dim">+{prs.length - 1} PR</span> : null}
+            <span className="wt-dim wt-repos" title={apps ? `${repos} · ${apps} app${apps === 1 ? "" : "s"}` : repos}>
+              {repos}
+              {apps ? ` · ${apps} app${apps === 1 ? "" : "s"}` : ""}
+            </span>
           </span>
         </>
       ) : (

@@ -455,16 +455,20 @@ export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, on
   return (
     <main className="logpane">
       <header className="toolbar" id="toolbar" data-tauri-drag-region>
-        <IconButton icon="ph ph-sidebar-simple" label="Toggle sidebar" kbd="Ctrl B" onClick={onToggleSide} />
-        {scope && (
-          <>
+        {/* A worktree's header already carries the sidebar toggle; a second one here would be the same button twice. */}
+        {scope ? (
+          <span className="scope" role="group" aria-label="Log scope">
             <span className="scope-t" title={`Only ${scopeLabel ?? "this worktree"}'s apps`}>
-              <i className="ph ph-funnel" /> logs · {scopeLabel ?? "worktree"}
+              <i className="ph ph-funnel" />
+              <span className="scope-l">{scopeLabel ?? "worktree"}</span>
             </span>
-            <button type="button" className="btn btn-ghost sm scope-all" title="Back to every app's logs" onClick={() => actions.selectWorktree(null)}>
-              <i className="ph ph-rows" /> All logs
+            <button type="button" className="scope-all" title="Leave the worktree and show every app's logs" onClick={() => actions.selectWorktree(null)}>
+              <i className="ph ph-x" />
+              <span className="lbl">All logs</span>
             </button>
-          </>
+          </span>
+        ) : (
+          <IconButton icon="ph ph-sidebar-simple" label="Toggle sidebar" kbd="Ctrl B" onClick={onToggleSide} />
         )}
         <label className="field">
           <i className="ph ph-magnifying-glass" />

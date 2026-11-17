@@ -3,12 +3,21 @@ import { countLevels } from "../logModel";
 import { actions, type Snapshot } from "../store";
 import { UpdateButton } from "./UpdateButton";
 
-export function StatusBar({ snap, follow, onGuide }: { snap: Snapshot; follow: boolean; onGuide: () => void }) {
+interface Props {
+  snap: Snapshot;
+  follow: boolean;
+  /** The open worktree: the line counts are its own, since its logs are all the workspace shows. */
+  scope: { label: string; ids: Set<string> } | null;
+  onGuide: () => void;
+}
+
+export function StatusBar({ snap, follow, scope, onGuide }: Props) {
   const kinds = Object.values(snap.states).map((s) => s.kind);
   const running = kinds.filter((k) => k === "running").length;
   const busy = kinds.filter((k) => k === "building" || k === "starting").length;
   const failed = kinds.filter((k) => k === "failed").length;
-  const { warn, err } = useMemo(() => countLevels(snap.logs), [snap.logs]);
+  const logs = useMemo(() => (scope ? snap.logs.filter((l) => scope.ids.has(l.instance)) : snap.logs), [snap.logs, scope]);
+  const { warn, err } = useMemo(() => countLevels(logs), [logs]);
   const mcp = snap.mcp;
   return (
     <footer className="status">
@@ -41,7 +50,7 @@ export function StatusBar({ snap, follow, onGuide }: { snap: Snapshot; follow: b
         onClick={() => void actions.setStartOnLogin(!snap.startOnLogin)}
       >
         <i className={snap.startOnLogin ? "ph-fill ph-power" : "ph ph-power"} />
-        start on login
+        <span className="lbl">start on login</span>
       </button>
       <button
         type="button"
@@ -52,7 +61,7 @@ export function StatusBar({ snap, follow, onGuide }: { snap: Snapshot; follow: b
         onClick={() => void actions.setCompanion(!snap.settings.companion)}
       >
         <i className={snap.settings.companion ? "ph-fill ph-robot" : "ph ph-robot"} />
-        companion
+        <span className="lbl">companion</span>
       </button>
       {mcp && (
         <button
@@ -66,8 +75,8 @@ export function StatusBar({ snap, follow, onGuide }: { snap: Snapshot; follow: b
           {mcp.url ? `mcp :${new URL(mcp.url).port}` : "mcp off"}
         </button>
       )}
-      <span className="g">
-        {snap.logs.length.toLocaleString()} lines · {warn} warn · <span className="bad-text">{err} err</span>
+      <span className="g" data-tip={scope ? `Lines of ${scope.label}'s apps` : "Lines of every app"} data-side="top">
+        {logs.length.toLocaleString()} lines · {warn} warn · <span className={err ? "bad-text" : undefined}>{err} err</span>
       </span>
       <span className={`g live${follow ? "" : " off"}`}>
         <i className="ph-fill ph-circle" />
