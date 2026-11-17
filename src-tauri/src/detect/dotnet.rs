@@ -71,6 +71,7 @@ pub fn app_def(flavor: Flavor, rel: &str, name: &str, port: Option<u16>) -> AppD
         program,
         args: args.iter().map(|a| a.to_string()).collect(),
         cwd: dir.to_string(),
+        env: Default::default(),
         ready: ready.iter().map(|r| r.to_string()).collect(),
     };
     let (kind, steps) = match flavor {

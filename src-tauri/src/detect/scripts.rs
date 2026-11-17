@@ -301,6 +301,7 @@ fn app_def(entry: Entry, rel_dir: &str) -> Result<AppDef, String> {
             program: Program::path(program),
             args: args.to_vec(),
             cwd,
+            env: Default::default(),
             ready: if service { entry.ready } else { Vec::new() },
         }],
         description,

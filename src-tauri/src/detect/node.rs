@@ -185,6 +185,7 @@ pub fn apps(manifest: &Value, pm: Pm, rel_dir: &str, folder: &str) -> Vec<AppDef
                     program: Program::path(pm.program()),
                     args: pm.run_args(script, &[]),
                     cwd: cwd_of(rel_dir),
+                    env: Default::default(),
                     ready: if service { READY.iter().map(|r| r.to_string()).collect() } else { Vec::new() },
                 }],
                 description: None,

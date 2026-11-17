@@ -34,6 +34,7 @@ Use these tools instead of running dev servers or builds in a terminal, so the u
 Call hub_list_apps first. Select an app by `app` (plus `worktree` or `repo` when the name is ambiguous), by `path` (your working directory), or by `instance`. \
 hub_start waits until a service is running, or a task has finished, or it has failed, and returns the log lines from that run. Use hub_logs with `since_seq` to poll for new output. \
 The user also saves groups of apps as presets: hub_list_presets shows them, and hub_start_preset runs one in a worktree. \
+A worktree can also have a stack (its committed spawner.stack.json, with per-checkout port overrides): hub_get_stack shows it, hub_set_port moves one app's port, hub_start_stack runs the whole stack at once with the ports linked through its env, and hub_stop_stack stops it. \
 To run your own script (a Python tool, a PowerShell helper) here, it has to be declared in a spawner.json: call hub_script_guide first, and do not run such scripts in a terminal.";
 
 /// Ports to try, best first. The last port that worked comes before the default so a client config
@@ -247,6 +248,41 @@ fn tool_definitions() -> Value {
             }, "required": ["preset"]}
         },
         {
+            "name": "hub_get_stack",
+            "description": "The stack of a worktree: what its committed spawner.stack.json declares, resolved for this checkout. Each app shows its repo, checkout (\"worktree\", or \"main\" when the repo runs from the shared main checkout), kind, mode, resolved port and port_source (\"worktree\" override, \"repo\" manifest, \"detected\", \"none\"), default_port, url and the env the manifest links to other ports. `missing` lists entries the manifest names that Spawner cannot find. With no manifest, `detected` lists the worktree's service apps, which the user can turn into a stack with the window's Use detected apps.",
+            "inputSchema": {"type": "object", "properties": {
+                "worktree": {"type": "string", "description": "Worktree id or label, such as \"PAYMENT-10138\" or \"main\". Case-insensitive."}
+            }, "required": ["worktree"]}
+        },
+        {
+            "name": "hub_set_port",
+            "description": "Save the port one stack app runs on. The override belongs to this checkout and is never committed; `port` null clears it and goes back to the manifest or detected port. Returns the port and its port_source. Refused for the kinds that cannot take one (tauri, scripts, tasks).",
+            "inputSchema": {"type": "object", "properties": {
+                "worktree": {"type": "string", "description": "Worktree id or label, such as \"PAYMENT-10138\". Case-insensitive."},
+                "app": {"type": "string", "description": "App name as hub_get_stack lists it, such as \"Acme.Bill.API\" or \"Bill.API\". Case-insensitive."},
+                "port": {"type": ["integer", "null"], "description": "The port to run it on, or null to go back to the default."}
+            }, "required": ["worktree", "app"]}
+        },
+        {
+            "name": "hub_start_stack",
+            "description": "Build and start every service app of a worktree's stack, concurrently, after applying the saved ports and the manifest's linked env ({port:Other app}). An app that is already running is reused. Waits like hub_start: until each service is running or has failed, up to timeout_seconds. One app's failure (a busy port, for instance) does not stop the others. Returns one compact line per app.",
+            "inputSchema": {"type": "object", "properties": {
+                "worktree": {"type": "string", "description": "Worktree id or label, such as \"PAYMENT-10138\". Case-insensitive."},
+                "apps": {"type": "array", "items": {"type": "string"}, "description": "Only these apps, by the names hub_get_stack lists. Default: every service app of the stack."},
+                "wait": {"type": "boolean", "description": "Wait for each app to be running or failed. Default true."},
+                "timeout_seconds": {"type": "integer", "description": "How long to wait. Default 180."},
+                "log_lines": {"type": "integer", "description": "Log lines to add under a failed app. Default 40."}
+            }, "required": ["worktree"]}
+        },
+        {
+            "name": "hub_stop_stack",
+            "description": "Stop every running service app of a worktree's stack and wait for them to exit. keep_shared (default true) leaves the apps that run from a main checkout, since another worktree's stack may still be using them; pass false to stop those too.",
+            "inputSchema": {"type": "object", "properties": {
+                "worktree": {"type": "string", "description": "Worktree id or label, such as \"PAYMENT-10138\". Case-insensitive."},
+                "keep_shared": {"type": "boolean", "description": "Leave the apps that run from a shared main checkout. Default true."}
+            }, "required": ["worktree"]}
+        },
+        {
             "name": "hub_script_guide",
             "description": "How to make a script show up in Spawner: where to put its spawner.json, the format, and what a script that suits Spawner does. Call this before writing or running a script that hub_list_apps does not list, and when the user asks to wire up their scripts.",
             "inputSchema": {"type": "object", "properties": {}}
@@ -325,6 +361,33 @@ struct LogsArgs {
     include_hub: Option<bool>,
     query: Option<String>,
     regex: Option<bool>,
+}
+
+#[derive(Deserialize, Default)]
+struct GetStackArgs {
+    worktree: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct SetPortArgs {
+    worktree: Option<String>,
+    app: Option<String>,
+    port: Option<u16>,
+}
+
+#[derive(Deserialize, Default)]
+struct StartStackArgs {
+    worktree: Option<String>,
+    apps: Option<Vec<String>>,
+    wait: Option<bool>,
+    timeout_seconds: Option<u64>,
+    log_lines: Option<usize>,
+}
+
+#[derive(Deserialize, Default)]
+struct StopStackArgs {
+    worktree: Option<String>,
+    keep_shared: Option<bool>,
 }
 
 #[derive(Clone, Debug)]
@@ -826,6 +889,178 @@ fn presets_json(hub: &Hub, presets: &[Preset], groups: &[Group]) -> Value {
     json!({"presets": list})
 }
 
+/// The stack tools: a worktree's `spawner.stack.json` resolved, run and stopped. They share `crate::stack` with the
+/// Tauri commands, so an agent and the window see the same stack.
+async fn stack_worktree(hub: &Arc<Hub>, wanted: Option<&str>) -> Result<(Group, Vec<Group>), String> {
+    let mut groups = hub.groups();
+    if groups.is_empty() {
+        groups = hub.rescan().await;
+    }
+    let wanted = wanted.map(str::trim).filter(|w| !w.is_empty()).ok_or("name a worktree: hub_list_apps shows them.")?;
+    match crate::stack::find_group(&groups, wanted) {
+        Some(group) => Ok((group.clone(), groups)),
+        None => {
+            let known = groups.iter().map(|g| g.id.as_str()).collect::<Vec<_>>().join(", ");
+            Err(format!("no worktree {wanted:?}. Worktrees: {known}"))
+        }
+    }
+}
+
+fn resolved(hub: &Arc<Hub>, groups: &[Group], group: &Group) -> Result<crate::stack::StackOut, String> {
+    crate::stack::resolve(groups, &group.id, &hub.port_overrides())
+}
+
+async fn get_stack(hub: &Arc<Hub>, a: GetStackArgs) -> Out {
+    let (group, groups) = match stack_worktree(hub, a.worktree.as_deref()).await {
+        Ok(found) => found,
+        Err(e) => return bad(e),
+    };
+    let stack = match resolved(hub, &groups, &group) {
+        Ok(stack) => stack,
+        Err(e) => return bad(e),
+    };
+    let mut text = serde_json::to_string_pretty(&stack).unwrap_or_default();
+    if stack.source.is_none() {
+        text.push_str(
+            "\n\nNo stack yet: call hub_start_stack after the user adds spawner.stack.json, or ask them to press Use detected apps.",
+        );
+    }
+    if !stack.missing.is_empty() {
+        let names = stack.missing.iter().map(|m| format!("{}/{}", m.repo, m.app)).collect::<Vec<_>>().join(", ");
+        text.push_str(&format!("\n\nNot found in {} or its main checkouts: {names}", stack.label));
+    }
+    ok(text)
+}
+
+/// The stack app an agent named: by name, id or instance, any case.
+fn stack_app<'a>(stack: &'a crate::stack::StackOut, wanted: &str) -> Option<&'a crate::stack::StackAppOut> {
+    stack.apps.iter().chain(stack.detected.iter()).find(|a| {
+        a.app.eq_ignore_ascii_case(wanted) || a.app_id.eq_ignore_ascii_case(wanted) || a.instance.eq_ignore_ascii_case(wanted)
+    })
+}
+
+async fn set_port(hub: &Arc<Hub>, a: SetPortArgs) -> Out {
+    let (group, groups) = match stack_worktree(hub, a.worktree.as_deref()).await {
+        Ok(found) => found,
+        Err(e) => return bad(e),
+    };
+    let before = match resolved(hub, &groups, &group) {
+        Ok(stack) => stack,
+        Err(e) => return bad(e),
+    };
+    let Some(wanted) = a.app.as_deref().map(str::trim).filter(|w| !w.is_empty()) else {
+        return bad("name an app: hub_get_stack lists them.");
+    };
+    let app = match stack_app(&before, wanted) {
+        Some(app) => app.clone(),
+        None => {
+            let names = before.apps.iter().chain(before.detected.iter()).map(|a| a.app.as_str()).collect::<Vec<_>>().join(", ");
+            return bad(format!("no app {wanted:?} in the stack of {}. It has: {names}", before.label));
+        }
+    };
+    if !app.port_settable {
+        return bad(format!("{} ({}) cannot take a port override: its port is fixed by its own config", app.app, app.kind));
+    }
+    if let Err(e) = hub.set_port_override(&app.project_id, &app.app_id, a.port) {
+        return bad(format!("could not save the port of {}: {e}", app.app));
+    }
+    let after = match resolved(hub, &groups, &group) {
+        Ok(stack) => stack,
+        Err(e) => return bad(e),
+    };
+    let Some(row) = after.apps.iter().chain(after.detected.iter()).find(|r| r.instance == app.instance) else {
+        return bad(format!("{} is no longer in the stack; rescan and try again", app.app));
+    };
+    let mut text = format!(
+        "{}: port {} (source {})\ninstance: {}\nIt applies the next time the app starts.",
+        row.app,
+        row.port.map_or_else(|| "none".into(), |p| p.to_string()),
+        row.port_source,
+        row.instance
+    );
+    // A busy port is not refused (the user may be about to stop whatever holds it), but it is worth saying.
+    if let Some(port) = row.port.filter(|p| hub.port_of(&row.instance) != Some(*p))
+        && let Some(holder) = crate::runner::port_holder(port)
+    {
+        text.push_str(&format!("\nnote: {holder} is listening on {port} now"));
+    }
+    ok(text)
+}
+
+fn stack_run_line(run: &crate::stack::Run) -> String {
+    let mut line = format!("- {}: {}", run.app, run.state);
+    if run.reused {
+        line.push_str(" (reused, already up)");
+    }
+    match (&run.error, &run.url) {
+        (Some(e), _) => line.push_str(&format!(". {e}")),
+        (None, Some(url)) => line.push_str(&format!(" at {url}")),
+        (None, None) => {
+            if let Some(port) = run.port {
+                line.push_str(&format!(" on port {port}"));
+            }
+        }
+    }
+    line
+}
+
+async fn start_stack(hub: &Arc<Hub>, a: StartStackArgs) -> Out {
+    let (group, _groups) = match stack_worktree(hub, a.worktree.as_deref()).await {
+        Ok(found) => found,
+        Err(e) => return bad(e),
+    };
+    let wait = match a.wait.unwrap_or(true) {
+        true => Duration::from_secs(a.timeout_seconds.unwrap_or(180).clamp(1, 600)),
+        false => Duration::ZERO,
+    };
+    let lines = a.log_lines.unwrap_or(40).min(MAX_TAIL);
+    let before = hub.last_seq();
+    let runs = match crate::stack::start(hub, &group.id, a.apps, wait).await {
+        Ok(runs) => runs,
+        Err(e) => return bad(e),
+    };
+    let error = runs.iter().any(|r| r.error.is_some());
+    let mut text = format!("stack {}: {} app{}", group.label, runs.len(), if runs.len() == 1 { "" } else { "s" });
+    for run in &runs {
+        text.push('\n');
+        text.push_str(&stack_run_line(run));
+        if run.error.is_some() && lines > 0 {
+            let rows: Vec<LogLine> = hub.logs_since(before).into_iter().filter(|l| l.instance == run.instance).collect();
+            for line in &rows[rows.len().saturating_sub(lines)..] {
+                text.push_str(&format!("\n    {} {}", line.level.label(), line.text));
+            }
+        }
+    }
+    Out { text, error }
+}
+
+async fn stop_stack(hub: &Arc<Hub>, a: StopStackArgs) -> Out {
+    let (group, groups) = match stack_worktree(hub, a.worktree.as_deref()).await {
+        Ok(found) => found,
+        Err(e) => return bad(e),
+    };
+    let before = match resolved(hub, &groups, &group) {
+        Ok(stack) => stack,
+        Err(e) => return bad(e),
+    };
+    let stops = match crate::stack::stop(hub, &group.id, a.keep_shared.unwrap_or(true)).await {
+        Ok(stops) => stops,
+        Err(e) => return bad(e),
+    };
+    let stopped = stops.iter().filter(|s| s.stopped).count();
+    let mut text = format!("stack {}: stopped {stopped} app{}", group.label, if stopped == 1 { "" } else { "s" });
+    for stop in &stops {
+        let shared = before.apps.iter().find(|a| a.instance == stop.instance).is_some_and(|a| a.shared);
+        let what = match (stop.stopped, shared) {
+            (true, _) => "stopped",
+            (false, true) => "kept (shared main checkout)",
+            (false, false) => "not running",
+        };
+        text.push_str(&format!("\n- {}: {what}", stop.app));
+    }
+    ok(text)
+}
+
 async fn call_tool(hub: &Arc<Hub>, params: &Value) -> Result<Value, (i32, String)> {
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
     let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
@@ -886,6 +1121,10 @@ async fn call_tool(hub: &Arc<Hub>, params: &Value) -> Result<Value, (i32, String
         },
         "hub_start_preset" => start_preset(hub, serde_json::from_value(args).map_err(invalid)?).await,
         "hub_stop_preset" => stop_preset(hub, serde_json::from_value(args).map_err(invalid)?).await,
+        "hub_get_stack" => get_stack(hub, serde_json::from_value(args).map_err(invalid)?).await,
+        "hub_set_port" => set_port(hub, serde_json::from_value(args).map_err(invalid)?).await,
+        "hub_start_stack" => start_stack(hub, serde_json::from_value(args).map_err(invalid)?).await,
+        "hub_stop_stack" => stop_stack(hub, serde_json::from_value(args).map_err(invalid)?).await,
         "hub_script_guide" => ok(script_guide(&hub.roots())),
         "hub_rescan" => {
             let groups = hub.rescan().await;
@@ -1123,7 +1362,19 @@ mod tests {
         assert!(note.starts_with("HTTP/1.1 202"), "{note}");
 
         let tools = rpc_over_tcp(addr, "localhost", r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#).await;
-        for name in ["hub_list_apps", "hub_start", "hub_stop", "hub_restart", "hub_logs", "hub_clear_logs", "hub_rescan"] {
+        for name in [
+            "hub_list_apps",
+            "hub_start",
+            "hub_stop",
+            "hub_restart",
+            "hub_logs",
+            "hub_clear_logs",
+            "hub_rescan",
+            "hub_get_stack",
+            "hub_set_port",
+            "hub_start_stack",
+            "hub_stop_stack",
+        ] {
             assert!(tools.contains(name), "missing {name}: {tools}");
         }
 
@@ -1209,6 +1460,7 @@ mod tests {
             program: crate::model::Program::path("cmd.exe"),
             args: vec!["/c".into(), script.into()],
             cwd: std::env::temp_dir().to_string_lossy().into_owned(),
+            env: Default::default(),
             ready: Vec::new(),
         }];
         task
@@ -1329,6 +1581,93 @@ mod tests {
         assert_eq!((apps[1]["port"].as_u64(), apps[1]["url"].as_str()), (Some(7398), Some("http://localhost:7398")), "the fixed port wins");
         let none = list_json(&[group], &HashMap::new(), &HashMap::new(), None, false);
         assert_eq!(none["worktrees"][0]["projects"][0]["apps"][0]["url"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn the_stack_tools_read_a_manifest_and_save_a_port() {
+        use crate::testutil::TempDir;
+        let tmp = TempDir::new("mcp-stack");
+        tmp.file("dev/PAYMENT-1/shop/spawner.stack.json", r#"{"name":"Shop","apps":[{"repo":"shop","app":"Shop","port":47100}]}"#);
+        let dir = tmp.path().join("dev/PAYMENT-1/shop").to_string_lossy().replace('\\', "/");
+        let mut web = app("Shop");
+        web.kind = "node".into();
+        web.learn_port = true;
+        let hub = Hub::new(Vec::new(), |_| {});
+        let plain_dir = tmp.dir("dev/PAYMENT-2/shop").to_string_lossy().replace('\\', "/");
+        let mut other = app("Shop");
+        other.kind = "node".into();
+        hub.set_groups(vec![
+            Group {
+                id: "PAYMENT-1".into(),
+                label: "PAYMENT-1".into(),
+                root: None,
+                root_id: "c:/dev".into(),
+                root_path: "C:/dev".into(),
+                main: false,
+                scripts: false,
+                projects: vec![Project { id: dir.clone(), repo: "shop".into(), path: dir, branch: None, apps: vec![web] }],
+            },
+            Group {
+                id: "PAYMENT-2".into(),
+                label: "PAYMENT-2".into(),
+                root: None,
+                root_id: "c:/dev".into(),
+                root_path: "C:/dev".into(),
+                main: false,
+                scripts: false,
+                projects: vec![Project { id: plain_dir.clone(), repo: "shop".into(), path: plain_dir, branch: None, apps: vec![other] }],
+            },
+        ]);
+
+        let read = get_stack(&hub, GetStackArgs { worktree: Some("payment-1".into()) }).await;
+        assert!(!read.error, "{}", read.text);
+        assert!(read.text.contains("\"port\": 47100") && read.text.contains("\"source\""), "{}", read.text);
+        assert!(!read.text.contains("No stack yet"), "{}", read.text);
+
+        let saved = set_port(&hub, SetPortArgs { worktree: Some("PAYMENT-1".into()), app: Some("shop".into()), port: Some(47105) }).await;
+        assert!(!saved.error, "{}", saved.text);
+        assert!(saved.text.contains("47105") && saved.text.contains("source worktree"), "{}", saved.text);
+        assert_eq!(hub.port_overrides().values().copied().collect::<Vec<_>>(), [47105]);
+
+        let cleared = set_port(&hub, SetPortArgs { worktree: Some("PAYMENT-1".into()), app: Some("Shop".into()), port: None }).await;
+        assert!(!cleared.error, "{}", cleared.text);
+        assert!(cleared.text.contains("source repo"), "{}", cleared.text);
+        assert!(hub.port_overrides().is_empty());
+
+        let unknown = set_port(&hub, SetPortArgs { worktree: Some("PAYMENT-1".into()), app: Some("Nope".into()), port: Some(1) }).await;
+        assert!(unknown.error && unknown.text.contains("no app \"Nope\""), "{}", unknown.text);
+        let missing = get_stack(&hub, GetStackArgs { worktree: Some("PAYMENT-9".into()) }).await;
+        assert!(missing.error && missing.text.contains("no worktree"), "{}", missing.text);
+
+        // A worktree with no manifest points at the two ways out, and lists what detection found.
+        let plain = get_stack(&hub, GetStackArgs { worktree: Some("PAYMENT-2".into()) }).await;
+        assert!(!plain.error, "{}", plain.text);
+        assert!(
+            plain
+                .text
+                .contains("No stack yet: call hub_start_stack after the user adds spawner.stack.json, or ask them to press Use detected apps."),
+            "{}",
+            plain.text
+        );
+        assert!(plain.text.contains("\"detected\"") && plain.text.contains("\"Shop\""), "{}", plain.text);
+    }
+
+    #[test]
+    fn the_stack_report_names_the_port_reuse_or_the_error() {
+        let run = |state: &str, port: Option<u16>, url: Option<&str>, error: Option<&str>, reused: bool| crate::stack::Run {
+            app: "Bill".into(),
+            instance: "p::a".into(),
+            state: state.into(),
+            port,
+            url: url.map(Into::into),
+            error: error.map(Into::into),
+            reused,
+        };
+        assert_eq!(stack_run_line(&run("running", Some(42318), Some("http://localhost:42318"), None, false)), "- Bill: running at http://localhost:42318");
+        assert_eq!(stack_run_line(&run("running", None, None, None, true)), "- Bill: running (reused, already up)");
+        assert_eq!(stack_run_line(&run("exited", Some(47100), None, None, false)), "- Bill: exited on port 47100");
+        let failed = stack_run_line(&run("failed", None, None, Some("port 42318 is already in use"), false));
+        assert_eq!(failed, "- Bill: failed. port 42318 is already in use");
     }
 
     fn port_1420_is_busy() -> bool {

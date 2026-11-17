@@ -8,8 +8,10 @@ mod mcp;
 mod model;
 mod notify;
 mod presets;
+mod review;
 mod roots;
 mod runner;
+mod stack;
 mod watch;
 mod worktree;
 #[cfg(test)]
@@ -23,6 +25,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent};
@@ -111,6 +114,9 @@ async fn restore_worktrees(hub: State<'_, Arc<Hub>>, removed: Vec<worktree::Remo
 
 /// Presets and pins, kept as one JSON document the UI owns (the MCP server reads the presets from it). They live in the app data directory so a webview reset cannot wipe them.
 const UI_STATE_FILE: &str = presets::FILE_NAME;
+
+/// The port overrides the user set per checkout. Never committed: a worktree can move a port without touching a repo.
+const PORTS_FILE: &str = "ports.json";
 
 #[tauri::command]
 fn load_ui_state(app: AppHandle) -> Result<Option<String>, String> {
@@ -210,8 +216,17 @@ async fn agent_add_guidance(kind: agent::Agent, snippet: String) -> Result<Strin
 
 #[tauri::command]
 fn open_port(port: u16) -> Result<(), String> {
+    open_url(format!("http://localhost:{port}"))
+}
+
+/// Opens a link in the user's browser. WebView2 refuses `window.open`, so the OS does it; only http(s) is allowed.
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("only http and https links can be opened".into());
+    }
     let mut cmd = std::process::Command::new("explorer");
-    cmd.arg(format!("http://localhost:{port}"));
+    cmd.arg(&url);
     discovery::no_window(&mut cmd);
     cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
 }
@@ -239,6 +254,60 @@ fn instance_ports(hub: State<'_, Arc<Hub>>) -> HashMap<String, u16> {
 #[tauri::command]
 fn logs_since(hub: State<'_, Arc<Hub>>, since: u64) -> Vec<LogLine> {
     hub.logs_since(since)
+}
+
+/// The stack card of a worktree: its `spawner.stack.json` resolved with the saved port overrides, or the detected
+/// service apps when it has none.
+#[tauri::command]
+async fn stack(hub: State<'_, Arc<Hub>>, worktree: String) -> Result<stack::StackOut, String> {
+    scanned(hub.inner()).await;
+    stack::current(hub.inner(), &worktree)
+}
+
+/// Writes `spawner.stack.json` with the worktree's detected service apps ("Use detected apps"). `apps` keeps only
+/// the ones ticked on the card.
+#[tauri::command]
+async fn write_stack(hub: State<'_, Arc<Hub>>, worktree: String, apps: Option<Vec<String>>) -> Result<stack::StackOut, String> {
+    scanned(hub.inner()).await;
+    stack::write(hub.inner(), &worktree, apps.as_deref())
+}
+
+/// The last scan, with a fresh one when Spawner has not scanned yet: a call can arrive before the first scan ends.
+async fn scanned(hub: &Arc<Hub>) {
+    if hub.groups().is_empty() {
+        hub.rescan().await;
+    }
+}
+
+#[tauri::command]
+fn set_port(hub: State<'_, Arc<Hub>>, project_id: String, app_id: String, port: Option<u16>) -> Result<(), String> {
+    hub.set_port_override(&project_id, &app_id, port)
+}
+
+/// The next port that nothing listens on and no app is assigned, for the "Use N and start" answer to a busy port.
+#[tauri::command]
+fn free_port(hub: State<'_, Arc<Hub>>, port: u16) -> u16 {
+    hub.free_port_suggestion(port)
+}
+
+#[tauri::command]
+async fn start_stack(hub: State<'_, Arc<Hub>>, worktree: String, apps: Option<Vec<String>>) -> Result<Vec<stack::Run>, String> {
+    // The window waits this long; the MCP start uses its own timeout.
+    stack::start(hub.inner(), &worktree, apps, Duration::from_secs(240)).await
+}
+
+#[tauri::command]
+async fn stop_stack(hub: State<'_, Arc<Hub>>, worktree: String, keep_shared: Option<bool>) -> Result<Vec<stack::Stop>, String> {
+    stack::stop(hub.inner(), &worktree, keep_shared.unwrap_or(false)).await
+}
+
+/// The open PRs of every repo in the scan, for the rail's "In review" section. Read-only, and cached per repo.
+#[tauri::command]
+async fn open_prs(hub: State<'_, Arc<Hub>>, force: Option<bool>) -> Result<review::PrFeed, String> {
+    scanned(hub.inner()).await;
+    let checkouts = review::checkouts(&hub.groups());
+    let force = force.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || review::open_prs(&checkouts, force)).await.map_err(|e| e.to_string())
 }
 
 /// Every window keeps its own copy of the log, so they are told which part was cleared.
@@ -397,6 +466,9 @@ pub fn run() {
             hub.persist_roots_to(roots_file);
             hub.persist_watch_to(data_file(app.handle(), watch::FILE_NAME)?);
             hub.read_ui_state_from(data_file(app.handle(), UI_STATE_FILE)?);
+            let ports_file = data_file(app.handle(), PORTS_FILE)?;
+            hub.read_ports_from(ports_file.clone());
+            hub.persist_ports_to(ports_file);
             app.manage(hub.clone());
             app.manage(mcp_state.clone());
             let port_file = data_file(app.handle(), "mcp-port.txt")?;
@@ -447,12 +519,20 @@ pub fn run() {
             agent_connect,
             agent_add_guidance,
             open_port,
+            open_url,
             start,
             stop,
             instance_states,
             instance_ports,
             logs_since,
-            clear_logs
+            clear_logs,
+            stack,
+            write_stack,
+            set_port,
+            free_port,
+            start_stack,
+            stop_stack,
+            open_prs
         ])
         .build(context())
         .expect("error while building tauri application");

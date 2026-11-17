@@ -6,7 +6,7 @@ use crate::level::{self, classify};
 use crate::job::Job;
 use crate::model::*;
 use crate::worktree;
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -32,6 +32,8 @@ pub struct Step {
     pub program: PathBuf,
     pub args: Vec<String>,
     pub cwd: PathBuf,
+    /// Variables for this step only (a stack moves a Node app's port through `PORT`).
+    pub env: BTreeMap<String, String>,
     pub ready: Vec<String>,
     /// Read the service's port from the first local URL in its output (`find_local_port`).
     pub learn_port: bool,
@@ -55,6 +57,9 @@ pub struct Hub {
     watch_file: OnceLock<PathBuf>,
     /// The window's saved presets and pins. Only read here; the UI writes it.
     ui_state_file: OnceLock<PathBuf>,
+    /// Port overrides by instance id (`project.id::app.id`), saved in `ports.json` in app data.
+    ports: Mutex<HashMap<String, u16>>,
+    ports_file: OnceLock<PathBuf>,
     groups: Mutex<Vec<Group>>,
     live: Mutex<HashMap<String, Live>>,
     logs: Mutex<VecDeque<LogLine>>,
@@ -86,6 +91,8 @@ impl Hub {
             watched: Mutex::new(BTreeSet::new()),
             watch_file: OnceLock::new(),
             ui_state_file: OnceLock::new(),
+            ports: Mutex::new(HashMap::new()),
+            ports_file: OnceLock::new(),
             groups: Mutex::new(Vec::new()),
             live: Mutex::new(HashMap::new()),
             logs: Mutex::new(VecDeque::new()),
@@ -123,6 +130,43 @@ impl Hub {
     /// Where the window saves its presets, so `ui_state` can read them.
     pub fn read_ui_state_from(&self, file: PathBuf) {
         let _ = self.ui_state_file.set(file);
+    }
+
+    /// Reads the port overrides saved in `file` and saves later changes there. Without it they only change memory.
+    pub fn persist_ports_to(&self, file: PathBuf) {
+        self.read_ports_from(file.clone());
+        let _ = self.ports_file.set(file);
+    }
+
+    /// Replaces the in-memory port overrides with what `file` holds; a missing or broken file is an empty set.
+    pub fn read_ports_from(&self, file: PathBuf) {
+        *self.ports.lock().unwrap() = read_ports(&file);
+    }
+
+    /// The port overrides the user set for a checkout, by instance id.
+    pub fn port_overrides(&self) -> HashMap<String, u16> {
+        self.ports.lock().unwrap().clone()
+    }
+
+    /// Saves (`Some`) or clears (`None`) the port of one app. Saves before committing, so a failed write leaves
+    /// memory and disk agreeing.
+    pub fn set_port_override(&self, project_id: &str, app_id: &str, port: Option<u16>) -> Result<(), String> {
+        let id = instance_id(project_id, app_id);
+        let mut ports = self.ports.lock().unwrap();
+        let mut next = ports.clone();
+        match port {
+            Some(p) => {
+                next.insert(id, p);
+            }
+            None => {
+                next.remove(&id);
+            }
+        }
+        if let Some(file) = self.ports_file.get() {
+            write_ports(file, &next)?;
+        }
+        *ports = next;
+        Ok(())
     }
 
     /// The window's saved state as text, or `None` before the window has saved anything.
@@ -408,6 +452,21 @@ impl Hub {
             return Err(format!("{} takes no extra arguments; only scripts declared in a spawner.json do", app.name));
         }
         let id = instance_id(project_id, app_id);
+        // A saved port override is applied to this copy, never to the app in the scan: starting again must not append
+        // the flag twice, and a cleared override must go back to the detected port.
+        if let Some(port) = self.port_overrides().get(&id).copied() {
+            let scheme = crate::stack::scheme_of(&self.groups(), &project, &app.id);
+            if let Err(e) = crate::stack::apply_port(&mut app, port, scheme.as_deref().unwrap_or("http")) {
+                self.note(&id, format!("saved port override ignored: {e}"));
+            }
+        }
+        self.start_app(&project, app, force)
+    }
+
+    /// Starts an app that is already resolved and configured (a stack start applies its ports and env first).
+    /// This is everything after the app is found: preflight, the launch plan and the spawn.
+    pub fn start_app(self: &Arc<Self>, project: &Project, app: AppDef, force: bool) -> Result<(), String> {
+        let id = instance_id(&project.id, &app.id);
         if self.live.lock().unwrap().get(&id).is_some_and(|l| l.state.is_active()) {
             return Err("already running".into());
         }
@@ -456,6 +515,13 @@ impl Hub {
         for id in ids {
             let _ = self.stop(&id);
         }
+    }
+
+    /// The next port above `port` that nothing listens on and that no app of this hub is assigned (a running app's
+    /// learned port or a saved override), for the "Use <port> and start" answer to a busy port.
+    pub fn free_port_suggestion(&self, port: u16) -> u16 {
+        let taken: Vec<u16> = self.ports().values().chain(self.port_overrides().values()).copied().collect();
+        (port.saturating_add(1)..=u16::MAX).find(|p| !taken.contains(p) && !port_in_use(*p)).unwrap_or(port)
     }
 
     fn find_app(&self, project_id: &str, app_id: &str) -> Option<(Project, AppDef)> {
@@ -551,6 +617,7 @@ async fn run_step(
 ) -> StepEnd {
     let mut cmd = Command::new(&step.program);
     cmd.args(&step.args)
+        .envs(&step.env)
         .current_dir(&step.cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -667,6 +734,12 @@ fn port_in_use(port: u16) -> bool {
         .any(|addr| TcpStream::connect_timeout(addr, Duration::from_millis(300)).is_ok())
 }
 
+/// The image name of whatever listens on `port`, for a conflict message such as "port 5104 is in use by
+/// iisexpress.exe (PID 1234)". `None` when nothing does.
+pub fn port_holder(port: u16) -> Option<String> {
+    listeners_on(port).first().map(|pid| process_name(*pid))
+}
+
 /// Process ids listening on `port`, read from `netstat`. Loopback and wildcard addresses of both IP versions.
 fn listeners_on(port: u16) -> Vec<u32> {
     let mut cmd = std::process::Command::new("netstat");
@@ -734,10 +807,29 @@ fn free_port(port: u16) -> Result<Vec<String>, String> {
     Ok(left)
 }
 
+/// `ports.json` in app data: the port overrides the user set, by instance id. Never written into a checkout, so a
+/// port can differ per worktree without touching a repo.
+fn read_ports(file: &Path) -> HashMap<String, u16> {
+    let Ok(text) = std::fs::read_to_string(file) else { return HashMap::new() };
+    serde_json::from_str(text.trim_start_matches('\u{feff}')).unwrap_or_default()
+}
+
+fn write_ports(file: &Path, ports: &HashMap<String, u16>) -> Result<(), String> {
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    }
+    let text = serde_json::to_string_pretty(ports).map_err(|e| e.to_string())?;
+    // Write beside the target and rename, so a crash mid-write never leaves a half file.
+    let tmp = file.with_extension("json.tmp");
+    std::fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, file).map_err(|e| format!("cannot write {}: {e}", file.display()))
+}
+
 /// Checks that run before anything is spawned. Only apps that ask for it (`check_port`) are held back by a busy port.
 fn preflight(app: &AppDef) -> Result<(), String> {
     match app.port.filter(|_| app.check_port) {
         Some(port) if port_in_use(port) => {
+            // The UI recognises this exact prefix and offers a free port next to it, so keep it as it is.
             Err(format!("port {port} is already in use (is Visual Studio or another instance running it?)"))
         }
         _ => Ok(()),
@@ -768,6 +860,7 @@ pub fn launch_plan(project: &Path, app: &AppDef) -> Result<Vec<Step>, String> {
                 program: detect::resolve(&spec.program)?,
                 args,
                 cwd,
+                env: spec.env.clone(),
                 ready: if task { Vec::new() } else { spec.ready.clone() },
                 learn_port: app.learn_port && !task && app.port.is_none(),
                 checkout: project.to_path_buf(),
@@ -826,6 +919,7 @@ mod tests {
             program: "cmd.exe".into(),
             args: vec!["/c".into(), script.into()],
             cwd: std::env::temp_dir(),
+            env: BTreeMap::new(),
             ready: ready.iter().map(|r| r.to_string()).collect(),
             learn_port: false,
             checkout: "C:/dev/shared".into(),
@@ -847,6 +941,7 @@ mod tests {
                 program: Program::path("cmd.exe"),
                 args: vec!["/c".into(), script.into()],
                 cwd: std::env::temp_dir().to_string_lossy().into_owned(),
+                env: BTreeMap::new(),
                 ready: ready.iter().map(|r| r.to_string()).collect(),
             }],
             description: None,
@@ -1219,5 +1314,107 @@ mod tests {
     #[test]
     fn strips_ansi_and_keeps_text() {
         assert_eq!(strip_ansi("\u{1b}[32minfo\u{1b}[0m: ok"), "info: ok");
+    }
+
+    #[test]
+    fn a_step_spec_env_reaches_the_launch_plan() {
+        let mut app = cmd_app("web", AppMode::Service, "exit 0", &[]);
+        app.steps[0].env.insert("PORT".into(), "4000".into());
+        let plan = launch_plan(Path::new("C:/x"), &app).unwrap();
+        assert_eq!(plan[0].env["PORT"], "4000");
+        assert!(launch_plan(Path::new("C:/x"), &cmd_app("web", AppMode::Service, "exit 0", &[])).unwrap()[0].env.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_step_runs_with_its_env() {
+        let (hub, seen) = collector();
+        let (ctx, _tx, rx) = register(&hub, "env");
+        let mut step = cmd_step("echo port=%PORT%&& exit 0", &["port="]);
+        step.env.insert("PORT".into(), "4000".into());
+        run_plan(ctx, vec![step], rx).await;
+        let seen = seen.lock().unwrap().clone();
+        assert!(seen.contains(&"log:Out:port=4000".to_string()), "{seen:?}");
+    }
+
+    #[tokio::test]
+    async fn a_saved_port_override_is_what_a_start_runs_on() {
+        let port = crate::testutil::spare_port();
+        let mut app = cmd_app("web", AppMode::Service, "echo PORT=%PORT%&& exit 0", &["PORT="]);
+        app.kind = "node".into();
+        let project = Project {
+            id: "p".into(),
+            repo: "r".into(),
+            path: std::env::temp_dir().to_string_lossy().into_owned(),
+            branch: None,
+            apps: vec![app.clone()],
+        };
+        let (hub, seen) = collector();
+        hub.set_groups(vec![Group {
+            id: "g".into(),
+            label: "g".into(),
+            root: None,
+            root_id: "r".into(),
+            root_path: "r".into(),
+            main: false,
+            scripts: false,
+            projects: vec![project],
+        }]);
+        hub.set_port_override("p", &app.id, Some(port)).unwrap();
+        assert_eq!(hub.port_overrides().len(), 1);
+
+        hub.start_with("p", &app.id, false, &HashMap::new(), &[]).unwrap();
+        let id = instance_id("p", &app.id);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !hub.states().get(&id).is_some_and(|s| matches!(s, InstanceState::Exited { .. })) {
+            assert!(Instant::now() < deadline, "no exit: {:?}", seen.lock().unwrap());
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let seen = seen.lock().unwrap().clone();
+        assert!(seen.contains(&format!("log:Out:PORT={port}")), "the override is the port it runs on: {seen:?}");
+        assert!(seen.contains(&"log:Sys:> cmd.exe /c echo PORT=%PORT%&& exit 0".to_string()), "unrelated args are untouched");
+
+        // The app in the scan keeps what the detector found: the override is applied to a copy at each start.
+        assert_eq!(hub.groups()[0].projects[0].apps[0].port, None);
+        assert!(!hub.groups()[0].projects[0].apps[0].check_port);
+    }
+
+    #[test]
+    fn port_overrides_are_saved_atomically_and_read_back() {
+        let tmp = crate::testutil::TempDir::new("ports");
+        let file = tmp.path().join("ports.json");
+        let (hub, _) = collector();
+        hub.read_ports_from(file.clone());
+        hub.persist_ports_to(file.clone());
+        hub.set_port_override("p", "a.csproj", Some(5105)).unwrap();
+        assert!(hub.port_overrides().contains_key("p::a.csproj"));
+
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.contains("\"p::a.csproj\": 5105"), "{text}");
+        assert!(!file.with_extension("json.tmp").exists(), "the temporary file is renamed, not left behind");
+
+        let (other, _) = collector();
+        other.persist_ports_to(file.clone());
+        assert_eq!(other.port_overrides(), HashMap::from([("p::a.csproj".to_string(), 5105)]));
+
+        other.set_port_override("p", "a.csproj", None).unwrap();
+        assert!(other.port_overrides().is_empty());
+        assert_eq!(std::fs::read_to_string(&file).unwrap().trim(), "{}");
+    }
+
+    #[test]
+    fn a_free_port_suggestion_skips_a_listening_port_and_one_already_assigned() {
+        let (listener, busy) = listening();
+        let (hub, _) = collector();
+
+        // The scan starts above the given port, so holding `busy` means it must come back above it.
+        let suggested = hub.free_port_suggestion(busy - 1);
+        assert!(suggested > busy, "busy={busy} suggested={suggested}");
+
+        // A port an app is already assigned is skipped too, whether or not anything listens on it.
+        put(&hub, "assigned", InstanceState::Running { pid: 1 });
+        hub.live.lock().unwrap().get_mut("assigned").unwrap().port = Some(suggested);
+        let next = hub.free_port_suggestion(suggested - 1);
+        assert!(next > suggested, "assigned={suggested} next={next}");
+        drop(listener);
     }
 }

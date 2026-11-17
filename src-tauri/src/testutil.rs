@@ -85,3 +85,11 @@ pub fn app(name: &str) -> AppDef {
         params: Vec::new(),
     }
 }
+
+/// A port nothing holds, below the dynamic range. A probe of such a port is reliable: the OS never hands it out as a
+/// local source port, so a loopback connect cannot look like a listener (which it can near the ephemeral range).
+pub fn spare_port() -> u16 {
+    (47_000..48_000)
+        .find(|port| std::net::TcpListener::bind(("127.0.0.1", *port)).is_ok())
+        .expect("a spare port between 47000 and 48000")
+}

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// How an app lives. A service runs until the user stops it and is "ready" when one of its patterns shows up in its output;
 /// a task runs to its own end and reports the exit code.
@@ -39,6 +40,9 @@ pub struct StepSpec {
     pub args: Vec<String>,
     /// Relative to the project folder (`.` for the folder itself), or absolute.
     pub cwd: String,
+    /// Environment variables for this step only, such as `PORT` for a Node app whose port the stack moves.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
     /// Output fragments that mean the app is up. Only a service's last step uses them.
     #[serde(default)]
     pub ready: Vec<String>,
