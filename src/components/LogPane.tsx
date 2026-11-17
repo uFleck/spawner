@@ -11,7 +11,7 @@ const MAX_TICKS = 400;
 
 type LevelFilter = "all" | "wrn" | "err";
 
-interface Props {
+export interface LogPaneProps {
   snap: Snapshot;
   hidden: Set<string>;
   selected: string | null;
@@ -24,6 +24,10 @@ interface Props {
   onToggleSide: () => void;
   /** A view handed over by the companion: its level, search text and the line it was scrolled to. */
   restore: { level: LevelFilter; query: string; anchor: number | null; nonce: number } | null;
+  /** When set, only these instances' lines are shown: the selected worktree's stack. */
+  scope?: Set<string> | null;
+  /** The worktree the scope belongs to, named in the header. */
+  scopeLabel?: string | null;
 }
 
 const TOK = /\b(GET|POST|PUT|DELETE|PATCH)\b|→ (\d{3})|\((\d+ms)\)|\b(\w+)=([\w.\-]+)|"([^"]+)"/g;
@@ -202,7 +206,7 @@ function Seg({ value, onChange }: { value: LevelFilter; onChange: (v: LevelFilte
   );
 }
 
-export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, onFocus, onToast, onToggleSide, restore }: Props) {
+export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, onFocus, onToast, onToggleSide, restore, scope = null, scopeLabel = null }: LogPaneProps) {
   const instances = useMemo(() => indexInstances(snap.groups), [snap.groups]);
   const [query, setQuery] = useState("");
   const [level, setLevel] = useState<LevelFilter>("all");
@@ -220,7 +224,9 @@ export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, on
   const searchRef = useRef<HTMLInputElement>(null);
   const ctx = useContextMenu();
 
-  const rows = useMemo(() => buildRows(snap.logs), [snap.logs]);
+  // A worktree's view shows only its stack's apps; the merged view shows everything.
+  const scoped = useMemo(() => (scope ? snap.logs.filter((l) => scope.has(l.instance)) : snap.logs), [snap.logs, scope]);
+  const rows = useMemo(() => buildRows(scoped), [scoped]);
 
   const counts = useMemo(() => {
     const m = new Map<string, { n: number; err: number }>();
@@ -274,9 +280,10 @@ export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, on
   const failed = useMemo(
     () =>
       Object.entries(snap.states)
-        .filter(([, s]) => s.kind === "failed")
+        // In a worktree's view, another worktree's broken app is not this pane's business.
+        .filter(([id, s]) => s.kind === "failed" && (!scope || scope.has(id)))
         .flatMap(([id, s]) => (s.kind === "failed" ? [{ id, message: s.message }] : [])),
-    [snap.states],
+    [snap.states, scope],
   );
 
   useLayoutEffect(() => {
@@ -449,11 +456,21 @@ export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, on
     <main className="logpane">
       <header className="toolbar" id="toolbar" data-tauri-drag-region>
         <IconButton icon="ph ph-sidebar-simple" label="Toggle sidebar" kbd="Ctrl B" onClick={onToggleSide} />
+        {scope && (
+          <>
+            <span className="scope-t" title={`Only ${scopeLabel ?? "this worktree"}'s apps`}>
+              <i className="ph ph-funnel" /> logs · {scopeLabel ?? "worktree"}
+            </span>
+            <button type="button" className="btn btn-ghost sm scope-all" title="Back to every app's logs" onClick={() => actions.selectWorktree(null)}>
+              <i className="ph ph-rows" /> All logs
+            </button>
+          </>
+        )}
         <label className="field">
           <i className="ph ph-magnifying-glass" />
           <input
             ref={searchRef}
-            placeholder="Filter logs · text or /regex/"
+            placeholder={scope ? "Filter this worktree's logs" : "Filter logs · text or /regex/"}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -605,7 +622,13 @@ export function LogPane({ snap, hidden, selected, follow, onFollow, onHidden, on
             );
           })}
           {visible.length === 0 && (
-            <p className="empty">{rows.length ? "No lines match." : "No log output yet. Run an app from the sidebar."}</p>
+            <p className="empty">
+              {rows.length
+                ? "No lines match."
+                : scope
+                  ? "No log output for this worktree yet. Run its stack to see it here."
+                  : "No log output yet. Run an app from the sidebar."}
+            </p>
           )}
           {failed.map((f) => {
             const info = instances.get(f.id);

@@ -1,7 +1,27 @@
 /* Dev-only stand-in for the Tauri backend, so the UI can be driven in a plain browser (`pnpm dev`).
    Groups mirror a real scan of C:/dev; run/stop/log output is simulated.
    Folders can be added and removed in memory (`?empty` starts with none); an added folder shows as one project. */
-import { api, rootName, type AppDef, type AppMode, type Group, type InstanceState, type Level, type LogLine, type Param, type PortEvent, type Root, type StateEvent } from "../api";
+import {
+  api,
+  isActive,
+  rootName,
+  type AppDef,
+  type AppMode,
+  type Group,
+  type InstanceState,
+  type Level,
+  type LogLine,
+  type Param,
+  type PortEvent,
+  type Pr,
+  type Project,
+  type ResolvedStack,
+  type Root,
+  type StackApp,
+  type StackMissing,
+  type StackRun,
+  type StateEvent,
+} from "../api";
 
 type Handler = (e: { event: string; id: number; payload: unknown }) => void;
 
@@ -101,6 +121,9 @@ const DEV_SCRIPTS: Group = {
 };
 
 const DEV_GROUPS: Group[] = [
+  task("PAYMENT-10138", (r) => [account(r, "PAYMENT-10138")]),
+  task("PAYMENT-10277", (r) => [account(r, "PAYMENT-10277"), bill(r, "PAYMENT-10277")]),
+  task("PAYMENT-10264", (r) => [account(r, "PAYMENT-10264")]),
   task("PAYMENT-9987", (r) => [account(r, "PAYMENT-9987")]),
   task("PAYMENT-9986", (r) => [account(r, "PAYMENT-9986"), project(r, "acme-site", "PAYMENT-9986", [app("Acme.Website")])]),
   task("PAYMENT-9483", (r) => [account(r, "PAYMENT-9483"), bill(r, "PAYMENT-9483")]),
@@ -137,6 +160,85 @@ let settings = { notifyScripts: false, companion: true };
 let startOnLogin = false;
 const watched = new Set<string>();
 const SAMPLE_FOLDERS = ["D:/side/notes-api", "C:/scripts/nightly", "C:/work/clients"];
+
+/** The scenarios the cockpit can be opened in: `?s=review|conflict|nostack|nogh`. */
+const SCENARIO = new URLSearchParams(location.search).get("s") ?? "review";
+/** `?nogh` on its own also turns gh off, since that is what the state is about. */
+const NO_GH = SCENARIO === "nogh" || new URLSearchParams(location.search).has("nogh");
+
+/** One entry of a committed spawner.stack.json, before it is matched to a checkout. */
+interface ManifestApp {
+  repo: string;
+  app: string;
+  port?: number;
+  scheme?: string;
+  env?: Record<string, string>;
+}
+
+interface Manifest {
+  name: string;
+  apps: ManifestApp[];
+  open: string[];
+}
+
+/**
+ * repo -> spawner.stack.json. Committed in the account repo, so every worktree of account gets the stack; app-api and
+ * acme-shield-api have none, which is where the no-stack card comes from. `?s=nostack` starts with no manifest at all.
+ */
+const MANIFESTS: Record<string, Manifest> = {
+  account: {
+    name: "Account + Bill",
+    apps: [
+      {
+        repo: "account",
+        app: "Acme.Account.Admin.Server",
+        port: 5104,
+        scheme: "https",
+        env: { BillApi__BaseUrl: "http://localhost:{port:Acme.Bill.API}" },
+      },
+      { repo: "bill", app: "Acme.Bill.API", port: 42318 },
+      { repo: "bill", app: "Acme.Bill.Charger.Monitor" },
+    ],
+    open: ["Acme.Account.Admin.Server"],
+  },
+};
+
+/** What `gh pr list` reports for the open branches, in the same shape as the backend's JSON. */
+const PRS: Pr[] = [
+  {
+    repo: "account",
+    slug: "ublr/account",
+    number: 1720,
+    title: "Show partial refunds on the invoice page",
+    head: "PAYMENT-10138",
+    draft: false,
+    review: "approved",
+    url: "https://github.com/ublr/account/pull/1720",
+    checks: { pass: 14, fail: 0, pending: 0, failing: [] },
+  },
+  {
+    repo: "account",
+    slug: "ublr/account",
+    number: 1736,
+    title: "Retry Asaas webhooks with backoff",
+    head: "PAYMENT-10277",
+    draft: false,
+    review: "changes",
+    url: "https://github.com/ublr/account/pull/1736",
+    checks: { pass: 13, fail: 1, pending: 0, failing: ["build-and-test"] },
+  },
+  {
+    repo: "account",
+    slug: "ublr/account",
+    number: 1734,
+    title: "Tax breakdown on the invoice PDF",
+    head: "PAYMENT-10264",
+    draft: true,
+    review: null,
+    url: "https://github.com/ublr/account/pull/1734",
+    checks: { pass: 9, fail: 0, pending: 5, failing: [] },
+  },
+];
 
 const normalize = (p: string) => p.trim().replace(/\\/g, "/").replace(/\/+$/, "");
 
@@ -200,6 +302,15 @@ export function installMock() {
   let nextFolder = 0;
   let seq = 1;
   let cb = 1;
+
+  /** The committed manifests, mutable because write_stack adds one. `?s=nostack` starts with none. */
+  const manifests: Record<string, Manifest> = SCENARIO === "nostack" ? {} : { ...MANIFESTS };
+  /** Manifest repos written by write_stack: on disk but not committed yet, so the card says so. */
+  const uncommitted = new Set<string>();
+  /** Port overrides Spawner keeps per checkout, never committed. Keyed `projectId::appId`. */
+  const overrides = new Map<string, number>();
+  /** Kinds Spawner can hand a port to at start; the rest run on whatever their own config says. */
+  const PORTABLE = new Set(["iis-express", "dotnet-run", "vite", "next", "react", "node"]);
 
   const emit = (event: string, payload: unknown) =>
     listeners.get(event)?.forEach((h) => h({ event, id: 0, payload }));
@@ -290,10 +401,25 @@ export function installMock() {
     log(id, "sys", `exited (code ${code})`);
     setState(id, { kind: "exited", code });
   }
-  async function start(projectId: string, appId: string, params: Record<string, string> | null = null) {
+  async function start(
+    projectId: string,
+    appId: string,
+    params: Record<string, string> | null = null,
+    opts: { port?: number | null; scheme?: string } = {},
+  ) {
     const id = `${projectId}::${appId}`;
     const name = appId.replace(".csproj", "");
+    const port = opts.port ?? null;
+    const scheme = opts.scheme ?? "http";
     if (params) log(id, "sys", `params: ${JSON.stringify(params)}`);
+    // The backend refuses a port something else holds, before it builds: the same message the card recognises.
+    const holder = port == null ? null : holderOf(port, id);
+    if (holder) {
+      const message = `port ${port} is already in use by ${holder}`;
+      log(id, "sys", `Not started: ${message}`);
+      setState(id, { kind: "failed", message });
+      return;
+    }
     if (appId.includes("#")) return runNode(id, appId);
     if (TASK_IDS.has(appId)) return runTask(id, name);
     setState(id, { kind: "building" });
@@ -306,10 +432,15 @@ export function installMock() {
       return;
     }
     setState(id, { kind: "starting" });
-    log(id, "sys", `> dotnet run --project ${name}`);
+    log(id, "sys", `> dotnet run --project ${name}${port != null ? ` --urls ${scheme}://localhost:${port}` : ""}`);
     await sleep(800);
     setState(id, { kind: "running", pid: 1000 + Math.floor(Math.random() * 9000) });
-    log(id, "out", "info: Microsoft.Hosting.Lifetime[14] Now listening on: http://localhost:5003");
+    if (port != null) {
+      setPort(id, port);
+      log(id, "out", `info: Microsoft.Hosting.Lifetime[14] Now listening on: ${scheme}://localhost:${port}`);
+    } else {
+      log(id, "out", "info: Microsoft.Hosting.Lifetime[14] Now listening on: http://localhost:5003");
+    }
     let n = 0;
     timers.set(
       id,
@@ -327,6 +458,219 @@ export function installMock() {
     log(id, "sys", "stopped");
     setPort(id, null);
     setState(id, { kind: "exited", code: null });
+  }
+
+  /* ───────── stacks: spawner.stack.json resolved against the worktree's checkouts ───────── */
+
+  const allGroups = () => groupsFor(roots);
+  const allProjects = () => allGroups().flatMap((g) => g.projects);
+  const mainProjects = () => allGroups().filter((g) => g.main).flatMap((g) => g.projects);
+  const findGroup = (id: string) => allGroups().find((g) => g.id === id);
+  const lower = (s: string) => s.toLowerCase();
+  const instanceOf = (p: Project, a: AppDef) => `${p.id}::${a.id}`;
+
+  /** A manifest names an app by name, by id, or by the id without its extension. */
+  function findApp(project: Project, name: string): AppDef | undefined {
+    const want = lower(name);
+    return (
+      project.apps.find((a) => lower(a.name) === want) ??
+      project.apps.find((a) => lower(a.id) === want) ??
+      project.apps.find((a) => lower(a.id.replace(/\.[^.]+$/, "")) === want)
+    );
+  }
+
+  /** The worktree's own checkout of a repo, else the main one (which is then shared with every worktree). */
+  const projectOf = (group: Group, repo: string) =>
+    group.projects.find((p) => p.repo === repo) ?? mainProjects().find((p) => p.repo === repo);
+
+  function stackApp(
+    group: Group,
+    project: Project,
+    app: AppDef,
+    manPort: number | undefined,
+    scheme: string,
+    envSpec: Record<string, string>,
+    known: { name: string; port: number | null }[],
+  ): StackApp {
+    const instance = instanceOf(project, app);
+    const own = group.projects.some((p) => p.id === project.id);
+    const override = overrides.get(instance);
+    const port = override ?? manPort ?? app.port ?? null;
+    const portSource: StackApp["portSource"] =
+      override != null ? "worktree" : manPort != null ? "repo" : app.port != null ? "detected" : "none";
+    /** `{port}` is this app's port, `{port:Other}` another stack app's, `{cwd}` the checkout. */
+    const fill = (raw: string) =>
+      raw
+        .replace(/\{port:([^}]+)\}/g, (whole, name: string) => {
+          const hit = known.find((k) => lower(k.name) === lower(name.trim()));
+          return hit?.port != null ? String(hit.port) : whole;
+        })
+        .replace(/\{port\}/g, port != null ? String(port) : "{port}")
+        .replace(/\{cwd\}/g, project.path);
+    return {
+      projectId: project.id,
+      appId: app.id,
+      instance,
+      app: app.name,
+      repo: project.repo,
+      checkout: own ? "worktree" : "main",
+      shared: !own,
+      kind: app.kind,
+      mode: app.mode,
+      port,
+      portSource,
+      defaultPort: manPort ?? app.port ?? null,
+      portSettable: PORTABLE.has(app.kind),
+      url: port != null ? `${scheme}://localhost:${port}` : null,
+      env: Object.fromEntries(Object.entries(envSpec).map(([k, v]) => [k, fill(v)])),
+    };
+  }
+
+  /** The worktree's service apps, for the no-stack card and for write_stack. */
+  const detectedOf = (group: Group) =>
+    group.projects.flatMap((p) =>
+      p.apps.filter((a) => a.mode === "service").map((a) => stackApp(group, p, a, undefined, "http", {}, [])),
+    );
+
+  /** Walks the worktree's repos in order; the first committed manifest wins, as the backend does. */
+  function resolveStack(group: Group): ResolvedStack {
+    const branch = group.projects.find((p) => p.branch)?.branch ?? null;
+    const base = { worktree: group.id, label: group.label, branch };
+    const repo = group.projects.map((p) => p.repo).find((r) => manifests[r]);
+    if (!repo) return { ...base, name: null, source: null, open: [], apps: [], missing: [], detected: detectedOf(group) };
+    const manifest = manifests[repo];
+    // Ports first: an app's env can point at another app's port.
+    const known = manifest.apps.flatMap((e) => {
+      const project = projectOf(group, e.repo);
+      const app = project && findApp(project, e.app);
+      if (!project || !app) return [];
+      const instance = instanceOf(project, app);
+      return [{ name: app.name, port: overrides.get(instance) ?? e.port ?? app.port ?? null }];
+    });
+    const apps: StackApp[] = [];
+    const missing: StackMissing[] = [];
+    for (const e of manifest.apps) {
+      const project = projectOf(group, e.repo);
+      const app = project && findApp(project, e.app);
+      if (!project || !app) {
+        missing.push({ repo: e.repo, app: e.app });
+        continue;
+      }
+      apps.push(stackApp(group, project, app, e.port, e.scheme ?? "http", e.env ?? {}, known));
+    }
+    const own = group.projects.find((p) => p.repo === repo);
+    return {
+      ...base,
+      name: manifest.name,
+      source: { repo, file: `${own?.path ?? repo}/spawner.stack.json`, committed: !uncommitted.has(repo) },
+      open: manifest.open,
+      apps,
+      missing,
+      detected: [],
+    };
+  }
+
+  /** The port this checkout's stack resolved for an app, so a per-app Run agrees with the card. */
+  function resolvedPort(projectId: string, appId: string): { port: number | null; scheme: string } {
+    for (const g of allGroups()) {
+      const hit = resolveStack(g).apps.find((a) => a.projectId === projectId && a.appId === appId);
+      if (hit) return { port: hit.port, scheme: hit.url?.startsWith("https") ? "https" : "http" };
+    }
+    const project = allProjects().find((p) => p.id === projectId);
+    return { port: project?.apps.find((a) => a.id === appId)?.port ?? null, scheme: "http" };
+  }
+
+  /** What holds a port: another instance of this mock that is running on it. */
+  function holderOf(port: number, self: string): string | null {
+    for (const [id, state] of Object.entries(states)) {
+      if (id === self || !isActive(state) || ports[id] !== port) continue;
+      return id.split("::")[1].replace(/\.csproj$/, "");
+    }
+    return null;
+  }
+
+  /** The next port above `from` that no running instance holds. */
+  function freePort(from: number): number {
+    const taken = new Set<number>();
+    for (const [id, state] of Object.entries(states)) if (isActive(state) && ports[id] != null) taken.add(ports[id]);
+    let port = from + 1;
+    while (taken.has(port)) port++;
+    return port;
+  }
+
+  /** One straight from the command layer: the app moves building -> running, or fails on its port. */
+  async function startStack(a: Record<string, unknown>): Promise<StackRun[]> {
+    const group = findGroup(String(a.worktree ?? ""));
+    if (!group) throw new Error("unknown worktree");
+    const stack = resolveStack(group);
+    if (!stack.source) throw new Error("no spawner.stack.json: use write_stack or add one");
+    const only = (a.apps as string[] | null | undefined) ?? null;
+    const selected = stack.apps.filter((x) => x.mode === "service" && (!only || only.includes(x.app)));
+    // Every app at once, like the backend: one app's failure never holds the others back.
+    return Promise.all(
+      selected.map(async (x): Promise<StackRun> => {
+        const running = states[x.instance];
+        if (isActive(running)) {
+          return { app: x.app, instance: x.instance, state: running.kind, port: x.port, url: x.url, error: null, reused: true };
+        }
+        await start(x.projectId, x.appId, null, {
+          port: x.port,
+          scheme: x.url?.startsWith("https") ? "https" : "http",
+        });
+        const done = states[x.instance];
+        return {
+          app: x.app,
+          instance: x.instance,
+          state: done?.kind ?? "stopped",
+          port: ports[x.instance] ?? x.port,
+          url: x.url,
+          error: done?.kind === "failed" ? done.message : null,
+          reused: false,
+        };
+      }),
+    );
+  }
+
+  async function stopStack(a: Record<string, unknown>) {
+    const group = findGroup(String(a.worktree ?? ""));
+    if (!group) throw new Error("unknown worktree");
+    const keepShared = a.keepShared !== false;
+    const stack = resolveStack(group);
+    // The UI passes keepShared = false, so this worktree really goes down; MCP may keep the shared main checkouts up.
+    return Promise.all(
+      stack.apps.map(async (x) => {
+        const stopped = isActive(states[x.instance]) && !(keepShared && x.shared);
+        if (stopped) await stop(x.instance);
+        return { app: x.app, instance: x.instance, stopped };
+      }),
+    );
+  }
+
+  /** A little history, so a worktree's logs are not empty before anything has been started in this session. */
+  function seedLogs() {
+    const group = allGroups().find((g) => g.id === "PAYMENT-10138");
+    const stack = group ? resolveStack(group) : null;
+    const web = stack?.apps[0];
+    if (!web) return;
+    let at = Date.now() - 7 * 60_000;
+    const push = (instance: string, level: Level, text: string) => {
+      logs.push({ seq: seq++, instance, ts: (at += 500), stream: level === "err" ? "err" : level === "sys" ? "sys" : "out", level, text });
+    };
+    const apiApp = stack.apps.find((x) => x.app === "Acme.Bill.API");
+    push(web.instance, "sys", `> dotnet build ${web.app} -nologo`);
+    push(web.instance, "sys", `> dotnet run --project ${web.app} --no-build --urls https://localhost:${web.port}`);
+    push(web.instance, "inf", `info: Microsoft.Hosting.Lifetime[14] Now listening on: https://localhost:${web.port}`);
+    if (apiApp) push(apiApp.instance, "inf", `GET /invoices/88421/refunds → 200 (18ms) count=2`);
+    push(web.instance, "inf", "GET /invoices/88421 → 200 (64ms) customer=c_4471");
+    push(web.instance, "inf", "POST /invoices/88421/refunds → 202 (122ms) amount=49.90 kind=partial");
+    if (apiApp) push(apiApp.instance, "wrn", "Slow query 812ms: SELECT * FROM RefundItems WHERE InvoiceId = @p0");
+    push(web.instance, "sys", `${web.app} stopped`);
+    const other = allGroups().find((g) => g.id === "PAYMENT-10277");
+    const second = other ? resolveStack(other).apps[0] : null;
+    if (second) {
+      push(second.instance, "sys", `> dotnet run --project ${second.app} --no-build`);
+      push(second.instance, "err", "Asaas webhook handler threw: System.TimeoutException: retry budget exhausted after 3 attempts");
+    }
   }
 
   const commands: Record<string, (a: Record<string, unknown>) => unknown> = {
@@ -382,8 +726,48 @@ export function installMock() {
       const keep = a.instanceId ? logs.filter((l) => l.instance !== a.instanceId) : [];
       logs.splice(0, logs.length, ...keep);
     },
-    start: (a) => void start(a.projectId as string, a.appId as string, a.params as Record<string, string> | null),
+    start: (a) => {
+      const resolved = resolvedPort(a.projectId as string, a.appId as string);
+      return void start(a.projectId as string, a.appId as string, a.params as Record<string, string> | null, resolved);
+    },
     stop: (a) => void stop(a.instanceId as string),
+
+    /* stacks */
+    stack: (a) => {
+      const group = findGroup(String(a.worktree ?? ""));
+      if (!group) throw new Error("unknown worktree");
+      return resolveStack(group);
+    },
+    write_stack: async (a) => {
+      await sleep(500);
+      const group = findGroup(String(a.worktree ?? ""));
+      if (!group) throw new Error("unknown worktree");
+      const repo = group.projects.map((p) => p.repo).find((r) => !manifests[r]);
+      if (!repo) throw new Error("spawner.stack.json already exists in this worktree");
+      const wanted = Array.isArray(a.apps) ? new Set((a.apps as string[]).map((n) => n.toLowerCase())) : null;
+      const detected = resolveStack(group).detected.filter((d) => !wanted || wanted.has(d.app.toLowerCase()));
+      if (!detected.length) throw new Error("no service app to put in a stack");
+      manifests[repo] = {
+        name: repo[0].toUpperCase() + repo.slice(1),
+        apps: detected.map((d) => ({ repo: d.repo, app: d.app, ...(d.port != null ? { port: d.port } : {}) })),
+        open: detected.filter((d) => d.port != null).slice(0, 1).map((d) => d.app),
+      };
+      uncommitted.add(repo);
+      return resolveStack(group);
+    },
+    set_port: (a) => {
+      const instance = `${String(a.projectId)}::${String(a.appId)}`;
+      if (a.port == null) overrides.delete(instance);
+      else overrides.set(instance, Number(a.port));
+    },
+    free_port: (a) => freePort(Number(a.port ?? 0)),
+    start_stack: (a) => startStack(a),
+    stop_stack: (a) => stopStack(a),
+    open_prs: async (a) => {
+      if (NO_GH) throw new Error("gh is not installed (install GitHub CLI and run gh auth login)");
+      await sleep(a.force ? 150 : 500);
+      return { prs: PRS, errors: [] };
+    },
     agent_check: async (a) => (
       await sleep(500),
       { installed: true, version: a.kind === "opencode" ? "2.2.7" : "2.1.303 (Claude Code)" }
@@ -420,6 +804,18 @@ export function installMock() {
     get_start_on_login: () => startOnLogin,
     set_start_on_login: (a) => void (startOnLogin = a.on as boolean),
   };
+
+  seedLogs();
+  if (SCENARIO === "conflict") {
+    // PAYMENT-10138 is already up on the repo defaults, so PAYMENT-10264's stack finds 5104 taken.
+    const group = allGroups().find((g) => g.id === "PAYMENT-10138");
+    const stack = group ? resolveStack(group) : null;
+    for (const app of stack?.apps ?? []) {
+      if (app.port != null) ports[app.instance] = app.port;
+      states[app.instance] = { kind: "running", pid: pid() };
+      log(app.instance, "out", `info: Microsoft.Hosting.Lifetime[14] Now listening on: ${app.url ?? "http://localhost"}`);
+    }
+  }
 
   const w = window as unknown as Record<string, unknown>;
   w.__TAURI_INTERNALS__ = {

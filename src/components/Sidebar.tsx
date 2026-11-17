@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { canWatch, instanceId, isActive, isErrorExit, rootName, watchKey, type AppDef, type Group, type InstanceState, type Project, type Root } from "../api";
 import { actions, type InstanceInfo, type Snapshot } from "../store";
 import logo from "../assets/spawner.svg";
@@ -6,6 +6,7 @@ import { memberOf, sameMember, type Preset } from "../presets";
 import { useContextMenu, type MenuItem } from "./ContextMenu";
 import { IconButton } from "./IconButton";
 import { Presets } from "./Presets";
+import { ReviewRail } from "./ReviewRail";
 import { ScriptsGuide } from "./ScriptsGuide";
 import { UndoToasts } from "./UndoToasts";
 
@@ -453,6 +454,31 @@ function Scripts({
   );
 }
 
+/** Today's app tree, folded away under one row: the review rail above is the way in now. */
+function AllApps({ open, onToggle, count, live, current, children }: { open: boolean; onToggle: () => void; count: number; live: number; current: boolean; children: ReactNode }) {
+  return (
+    <section className={`allapps${open ? "" : " closed"}`}>
+      <div className="allapps-h" onClick={onToggle}>
+        <span className="caret">
+          <i className="ph-bold ph-caret-down" />
+        </span>
+        <span className="t">All apps &amp; logs</span>
+        {live > 0 ? <span className="sum live">{live} running</span> : <span className="n">{count}</span>}
+        <IconButton
+          small
+          icon="ph ph-rows"
+          label="Show the merged logs"
+          pressed={current}
+          onClick={(e) => (e.stopPropagation(), actions.selectWorktree(null))}
+        />
+      </div>
+      <div className="collapse">
+        <div className="in">{children}</div>
+      </div>
+    </section>
+  );
+}
+
 /** Placeholder rows for the first scan and while a folder is added or removed, so the tree reads as being filled in rather than empty. */
 function ScanningRows() {
   return (
@@ -666,7 +692,12 @@ export function Sidebar({ snap, theme, onSolo, onTheme, onGuide, onLogoClick, on
   }, [listed, snap.pins.groups, snap.concluding, snap.lastRun, text, keep, recent]);
   const worktrees = useMemo(() => groups.filter((g) => !g.scripts), [groups]);
   const scripts = useMemo(() => groups.filter((g) => g.scripts), [groups]);
-  const active = Object.values(snap.states).filter(isActive).length;
+  const liveApps = useMemo(
+    () => worktrees.reduce((n, g) => n + g.projects.reduce((m, p) => m + p.apps.filter((a) => isActive(snap.states[instanceId(p.id, a.id)])).length, 0), 0),
+    [worktrees, snap.states],
+  );
+  // The existing tree is a fallback now, so it starts folded; the review rail and the workspace are the front door.
+  const [allOpen, setAllOpen] = useState(false);
 
   return (
     <aside className="rail" id="rail">
@@ -695,32 +726,29 @@ export function Sidebar({ snap, theme, onSolo, onTheme, onGuide, onLogoClick, on
           onChange={(e) => setQuery(e.target.value)}
         />
       </label>
-      <Presets snap={snap} />
-      <PinnedApps snap={snap} query={text} onSolo={onSolo} keep={keep} recent={recent} />
-      {snap.marked.length > 0 ? (
+      {snap.marked.length > 0 && (
         <div className="runbar marks">
           <span>{snap.marked.length} marked</span>
           <IconButton small icon="ph ph-arrow-clockwise" label="Restart marked" onClick={() => void actions.restartMarked()} />
           <IconButton small className="danger" icon="ph ph-stop" label="Stop marked" onClick={() => void actions.stopMarked()} />
           <IconButton small icon="ph ph-x" label="Clear marks" onClick={actions.clearMarks} />
         </div>
-      ) : (
-        <div className="runbar">
-          <span className={active > 0 ? "live" : ""}>{active > 0 ? `${active} running` : "Nothing running"}</span>
-          <IconButton small icon="ph ph-arrow-clockwise" label="Restart all" disabled={active === 0} onClick={() => void actions.restartAll()} />
-          <IconButton small className="danger" icon="ph ph-stop" label="Stop all" disabled={active === 0} onClick={() => void actions.stopAll()} />
-        </div>
       )}
       <div className="tree">
         <div className="tree-in">
-          {worktrees.map((g) => (
-            <GroupBlock key={g.id} group={g} snap={snap} onSolo={onSolo} expand={keep !== null} />
-          ))}
-          {(snap.loading || (!snap.scanned && snap.roots.length > 0)) && <ScanningRows />}
-          {groups.length === 0 && snap.groups.length > 0 && (keep || text) && <p className="empty">No apps match.</p>}
+          <ReviewRail snap={snap} query={text} />
+          <PinnedApps snap={snap} query={text} onSolo={onSolo} keep={keep} recent={recent} />
           {snap.scanned && !snap.loading && snap.roots.length > 0 && (
             <Scripts groups={scripts} snap={snap} onSolo={onSolo} onToast={onToast} filtering={keep !== null || text !== ""} />
           )}
+          <AllApps open={allOpen} onToggle={() => setAllOpen(!allOpen)} count={worktrees.length} live={liveApps} current={snap.selectedWorktree === null}>
+            {worktrees.map((g) => (
+              <GroupBlock key={g.id} group={g} snap={snap} onSolo={onSolo} expand={keep !== null} />
+            ))}
+            {(snap.loading || (!snap.scanned && snap.roots.length > 0)) && <ScanningRows />}
+            {groups.length === 0 && snap.groups.length > 0 && (keep || text) && <p className="empty">No apps match.</p>}
+          </AllApps>
+          <Presets snap={snap} />
           {!snap.loading && snap.roots.length === 0 && (
             <div className="empty">
               <p>Add a folder to get started. Spawner scans it for repos, git worktrees and projects you can run.</p>

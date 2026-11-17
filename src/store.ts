@@ -14,9 +14,11 @@ import {
   type LogLine,
   type McpInfo,
   type PortEvent,
+  type Pr,
   type Project,
   type RefusedWorktree,
   type RemovedWorktree,
+  type ResolvedStack,
   type Root,
   type Settings,
   type StateEvent,
@@ -74,6 +76,14 @@ export interface Undo {
   partial: boolean;
 }
 
+/** A port a stack could not take, and the one to offer instead. Keyed by instance id. */
+export interface StackConflict {
+  port: number;
+  /** What holds the port, when the backend says. */
+  holder: string | null;
+  free: number;
+}
+
 export interface Snapshot {
   roots: Root[];
   groups: Group[];
@@ -113,6 +123,24 @@ export interface Snapshot {
   marked: string[];
   /** `watchKey`s of the apps that run under `dotnet watch`. */
   watched: string[];
+  /** The stack of `stackFor`, or the last one seen when nothing is selected. */
+  stack: ResolvedStack | null;
+  /** The worktree `stack` belongs to. */
+  stackFor: string | null;
+  /** Every worktree's stack seen this session, keyed by worktree id. */
+  stacks: Record<string, ResolvedStack>;
+  /** A start, stop or write is in flight, so the card's buttons hold. */
+  stackBusy: boolean;
+  /** Why the last stack call failed, shown on the stack card. */
+  stackError: string | null;
+  /** Ports a start could not take, keyed by instance id. */
+  stackConflicts: Record<string, StackConflict>;
+  /** The open PRs `gh` reported, and when they were last asked for. */
+  prs: Pr[];
+  prsAt: number;
+  prsError: string | null;
+  /** The worktree the workspace shows; null is the merged "All apps & logs" view. */
+  selectedWorktree: string | null;
 }
 
 export interface InstanceInfo {
@@ -149,6 +177,16 @@ let snapshot: Snapshot = {
   presetDraft: null,
   marked: [],
   watched: [],
+  stack: null,
+  stackFor: null,
+  stacks: {},
+  stackBusy: false,
+  stackError: null,
+  stackConflicts: {},
+  prs: [],
+  prsAt: 0,
+  prsError: null,
+  selectedWorktree: null,
 };
 const listeners = new Set<() => void>();
 let lastSeq = 0;
@@ -194,6 +232,8 @@ function onState({ id, state }: StateEvent) {
     states: { ...snapshot.states, [id]: state },
     entered: changed ? { ...snapshot.entered, [id]: Date.now() } : snapshot.entered,
     ...(started ? { lastRun: { ...snapshot.lastRun, [id]: Date.now() } } : {}),
+    // A port that was busy is the reason a stack failed; once the app is up, the warning has served its purpose.
+    ...(started && snapshot.stackConflicts[id] ? { stackConflicts: without(snapshot.stackConflicts, id) } : {}),
   });
   if (started) persistUiState();
 }
@@ -467,6 +507,65 @@ async function undoConclude(id: string) {
   setTimeout(() => set({ revived: snapshot.revived.filter((g) => g !== undo.groupId) }), RESTORED_MS + 600);
 }
 
+/**
+ * A backend error as one line worth showing. A stack card has room for a sentence, not a Rust backtrace or a rejected
+ * promise, so the first line is all it gets.
+ */
+function readable(e: unknown): string {
+  const raw = typeof e === "string" ? e : e instanceof Error ? e.message : String(e ?? "");
+  return raw.replace(/^Error:\s*/, "").split("\n")[0].trim() || "Something went wrong";
+}
+
+/**
+ * The stack commands only exist on a backend that knows about worktree stacks. An older one answers "Command stack
+ * not found", which is not the app's fault: say what is missing rather than leaving the card empty.
+ */
+function stackProblem(e: unknown): string {
+  const text = readable(e);
+  return /command\s+\S+\s+not found/i.test(text) ? "This build of Spawner cannot read or run stacks. Update it." : text;
+}
+
+/** What holds a busy port, when the start's error names it. */
+function portHolder(error: string): string | null {
+  const m = /in use by ([^,()]+)/i.exec(error);
+  return m ? m[1].trim() : null;
+}
+
+/** Re-reads what actually runs, after one call changed several instances at once. */
+async function refreshInstances() {
+  const [states, ports] = await Promise.all([api.instanceStates(), api.instancePorts()]);
+  set({ states, ports });
+}
+
+let prsRequest: Promise<boolean> | null = null;
+/** Loads in flight, so opening a worktree twice in one tick asks the backend once. */
+const stackLoads = new Map<string, Promise<void>>();
+
+/**
+ * Reads a worktree's stack. Every failure is kept on the snapshot instead of thrown: the rail, the merged logs and
+ * every existing command keep working when the stack commands are missing or the manifest is broken.
+ */
+function loadStack(id: string, force = false): Promise<void> {
+  if (!force && snapshot.stacks[id]) return Promise.resolve();
+  const inFlight = stackLoads.get(id);
+  if (inFlight) return inFlight;
+  const load = (async () => {
+    try {
+      const stack = await api.stack(id);
+      set({
+        stacks: { ...snapshot.stacks, [id]: stack },
+        ...(snapshot.selectedWorktree === id ? { stack, stackFor: id, stackError: null } : {}),
+      });
+    } catch (e) {
+      if (snapshot.selectedWorktree === id) set({ stack: null, stackFor: id, stackError: stackProblem(e) });
+    } finally {
+      stackLoads.delete(id);
+    }
+  })();
+  stackLoads.set(id, load);
+  return load;
+}
+
 export const actions = {
   /** Opens the dialog that asks before a worktree is concluded. */
   askConclude: (group: Group) => set({ dialog: { kind: "confirm", group } }),
@@ -510,6 +609,118 @@ export const actions = {
       fail(e);
     }
   },
+  /** The worktree the workspace shows. Null is the merged "All apps & logs" view. */
+  selectWorktree(id: string | null) {
+    const cached = id ? (snapshot.stacks[id] ?? null) : null;
+    set({ selectedWorktree: id, stack: cached, stackFor: cached ? id : null, stackError: null });
+    // Show the cached stack at once, then re-read it: an agent or another window may have moved a port since.
+    if (id) void loadStack(id, true);
+  },
+  loadStack,
+  /**
+   * Asks gh for the open PRs. Never throws: a missing gh only empties the In review section, which says why, while the
+   * rest of the app keeps working. Returns whether it worked, so App.tsx can back off from a failing gh.
+   */
+  async refreshPrs(force = false): Promise<boolean> {
+    if (prsRequest) return prsRequest;
+    const run = (async () => {
+      try {
+        const feed = await api.openPrs(force);
+        set({ prs: feed.prs, prsAt: Date.now(), prsError: feed.errors.length ? feed.errors.join("; ") : null });
+        return feed.errors.length === 0;
+      } catch (e) {
+        // `prsAt` moves on a failure too: App.tsx schedules the next try from it, and the section says why instead of an age.
+        const text = readable(e);
+        const old = /command\s+\S+\s+not found/i.test(text);
+        set({ prsError: old ? "this build of Spawner cannot list pull requests" : text, prsAt: Date.now() });
+        return false;
+      } finally {
+        prsRequest = null;
+      }
+    })();
+    prsRequest = run;
+    return run;
+  },
+  /** Saves this checkout's port, then reloads the stacks that hold the app so the card shows the new port at once. */
+  async setPort(projectId: string, appId: string, port: number | null) {
+    try {
+      await api.setPort(projectId, appId, port);
+    } catch (e) {
+      return set({ stackError: stackProblem(e) });
+    }
+    const instance = instanceId(projectId, appId);
+    set({ stackConflicts: without(snapshot.stackConflicts, instance), stackError: null });
+    const holders = Object.entries(snapshot.stacks)
+      .filter(([, s]) => s.apps.some((a) => a.projectId === projectId && a.appId === appId))
+      .map(([key]) => key);
+    const selected = snapshot.selectedWorktree;
+    const reload = new Set([...holders, ...(selected ? [selected] : [])]);
+    await Promise.all([...reload].map((key) => loadStack(key, true)));
+  },
+  /** Runs the stack of a worktree, and turns a busy port into an offer on the card instead of a dead end. */
+  async startStack(id: string, apps?: string[]) {
+    if (snapshot.stackBusy) return;
+    set({ stackBusy: true, stackError: null });
+    try {
+      // The overrides live on the backend; reload so a port edited a moment ago is the one that starts.
+      await loadStack(id, true);
+      const runs = await api.startStack(id, apps);
+      const conflicts = { ...snapshot.stackConflicts };
+      const failures: string[] = [];
+      for (const run of runs) {
+        if (!run.error) continue;
+        const busy = /port (\d+) is already in use/i.exec(run.error);
+        if (!busy) {
+          failures.push(`${run.app}: ${run.error}`);
+          continue;
+        }
+        const port = Number(busy[1]);
+        let free = port + 1;
+        try {
+          free = await api.freePort(port);
+        } catch {
+          // An older backend cannot suggest a port; the next one is still a better offer than nothing.
+        }
+        conflicts[run.instance] = { port, holder: portHolder(run.error), free };
+      }
+      set({ stackConflicts: conflicts, ...(failures.length ? { stackError: failures.join(" · ") } : {}) });
+      await refreshInstances();
+      await loadStack(id, true);
+    } catch (e) {
+      set({ stackError: stackProblem(e) });
+    } finally {
+      set({ stackBusy: false });
+    }
+  },
+  /** Stops every stack app, main checkouts included: the user asked for this worktree to be down. */
+  async stopStack(id: string) {
+    if (snapshot.stackBusy) return;
+    set({ stackBusy: true, stackError: null });
+    try {
+      await api.stopStack(id, false);
+      await refreshInstances();
+      await loadStack(id, true);
+    } catch (e) {
+      set({ stackError: stackProblem(e) });
+    } finally {
+      set({ stackBusy: false });
+    }
+  },
+  /** Writes spawner.stack.json from the worktree's detected service apps, then shows the stack it produced. `apps`
+   *  are the ones ticked on the no-stack card; nothing means all of them. */
+  async writeStack(id: string, apps?: string[]) {
+    if (snapshot.stackBusy) return;
+    set({ stackBusy: true, stackError: null });
+    try {
+      const stack = await api.writeStack(id, apps);
+      set({ stacks: { ...snapshot.stacks, [id]: stack }, stack, stackFor: id });
+    } catch (e) {
+      set({ stackError: stackProblem(e) });
+    } finally {
+      set({ stackBusy: false });
+    }
+  },
+  clearStackConflict: (instance: string) => set({ stackConflicts: without(snapshot.stackConflicts, instance) }),
   /** Runs an app. A script that declares params is asked for them first, unless `params` are given. */
   start(projectId: string, appId: string, force = false, params?: Record<string, string>) {
     if (!params && findApp(projectId, appId)?.params.length) return Promise.resolve(set({ runAsk: { projectId, appId }, error: null }));
@@ -607,6 +818,7 @@ export const actions = {
   addRoot: (path: string, label?: string) => changeRoots(() => api.addRoot(path, label), { path, label }),
   removeRoot: (path: string) => changeRoots(() => api.removeRoot(path)),
   openPort: (port: number) => api.openPort(port).catch(fail),
+  openUrl: (url: string) => api.openUrl(url),
   setNotifyScripts: (notifyScripts: boolean) => saveSettings({ notifyScripts }),
   setCompanion: (companion: boolean) => saveSettings({ companion }),
   setStartOnLogin: async (startOnLogin: boolean) => {

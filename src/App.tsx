@@ -11,11 +11,16 @@ import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { TooltipHost } from "./components/TooltipHost";
 import { WindowControls } from "./components/WindowControls";
+import { WorktreeView } from "./components/WorktreeView";
 import { useSpawnerTheme } from "./spawnerTheme";
 import { actions, indexInstances, initStore, useSnapshot } from "./store";
 import "./styles/hub.css";
 
 type Theme = "dark" | "light";
+
+/** How often the open PRs are re-read, and the ceiling when gh keeps failing. */
+const PR_REFRESH_MS = 60_000;
+const PR_RETRY_MAX_MS = 600_000;
 
 const storedTheme = (): Theme => {
   const saved = localStorage.getItem("hub-theme");
@@ -39,10 +44,66 @@ export default function App() {
   const [restore, setRestore] = useState<{ level: "all" | "wrn" | "err"; query: string; anchor: number | null; nonce: number } | null>(null);
   const [toast, setToast] = useState<{ text: string; on: boolean }>({ text: "", on: false });
   const toastTimer = useRef<number | undefined>(undefined);
+  // Effects with no dependencies still need the newest snapshot (the focus handler checks when the PRs are from).
+  const snapRef = useRef(snap);
+  snapRef.current = snap;
 
   useEffect(() => {
     void initStore();
   }, []);
+
+  /**
+   * Open PRs are read-only facts, so they are polled: on mount, every minute while the window is visible, and on focus
+   * when the list is older than that. A failing gh backs off (60 → 120 → 240 → 600 s) instead of retrying hot. The
+   * store itself never polls.
+   */
+  useEffect(() => {
+    let timer = 0;
+    let delay = PR_REFRESH_MS;
+    let stopped = false;
+    const next = () => {
+      if (!stopped) timer = window.setTimeout(fire, delay);
+    };
+    const fire = async () => {
+      if (stopped) return;
+      if (document.visibilityState !== "visible") return next();
+      const ok = await actions.refreshPrs();
+      delay = ok ? PR_REFRESH_MS : Math.min(delay * 2, PR_RETRY_MAX_MS);
+      next();
+    };
+    void fire();
+    const restart = () => {
+      window.clearTimeout(timer);
+      delay = PR_REFRESH_MS;
+      void fire();
+    };
+    const onVisible = () => document.visibilityState === "visible" && restart();
+    const onFocus = () => Date.now() - snapRef.current.prsAt >= PR_REFRESH_MS && restart();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
+
+  // A worktree shows a different set of apps, so a focus or a solo taken in the merged view would hide all of its logs.
+  useEffect(() => {
+    setHidden(new Set());
+    setSelected(null);
+  }, [snap.selectedWorktree]);
+
+  // Dev only: `?worktree=<id>` opens a worktree on load, so the mock's states can be linked to and screenshotted.
+  const linked = useRef(false);
+  useEffect(() => {
+    if (linked.current || !import.meta.env.DEV) return;
+    const want = new URLSearchParams(location.search).get("worktree");
+    if (!want || !snap.groups.some((g) => g.id === want)) return;
+    linked.current = true;
+    actions.selectWorktree(want);
+  }, [snap.groups]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -139,6 +200,21 @@ export default function App() {
     [theme, toggleSide, toggleTheme],
   );
 
+  // The selected worktree is the whole workspace; without one, today's merged log view stays exactly as it was.
+  const worktree = snap.selectedWorktree ? (snap.groups.find((g) => g.id === snap.selectedWorktree) ?? null) : null;
+  const logProps = {
+    snap,
+    hidden,
+    selected,
+    follow,
+    onFollow: setFollow,
+    onHidden: setHidden,
+    onFocus: toggleFocus,
+    onToast: showToast,
+    onToggleSide: toggleSide,
+    restore,
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
@@ -172,18 +248,11 @@ export default function App() {
         onToast={showToast}
       />
       <div className="main">
-        <LogPane
-          snap={snap}
-          hidden={hidden}
-          selected={selected}
-          follow={follow}
-          onFollow={setFollow}
-          onHidden={setHidden}
-          onFocus={toggleFocus}
-          onToast={showToast}
-          onToggleSide={toggleSide}
-          restore={restore}
-        />
+        {worktree ? (
+          <WorktreeView snap={snap} group={worktree} log={logProps} />
+        ) : (
+          <LogPane {...logProps} />
+        )}
         <StatusBar snap={snap} follow={follow} onGuide={() => setGuide(true)} />
       </div>
       <div className="scrim" onClick={() => setDrawer(false)} />

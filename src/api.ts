@@ -13,6 +13,8 @@ export interface StepSpec {
   /** Relative to the project folder, or absolute. */
   cwd: string;
   ready: string[];
+  /** Extra environment for the process, with the stack's placeholders already filled in. */
+  env?: Record<string, string>;
 }
 
 /** An argument a script declares in its spawner.json, asked for in a form before the script runs. */
@@ -65,6 +67,111 @@ export interface Project {
 export interface Root {
   path: string;
   label?: string;
+}
+
+/** The `spawner.stack.json` a worktree's stack came from. */
+export interface StackSource {
+  /** The repo (`Project.repo`) whose checkout holds the file. */
+  repo: string;
+  /** The absolute path of the file. */
+  file: string;
+  /** Whether git tracks the file, so every new worktree of the repo inherits it. */
+  committed: boolean;
+}
+
+/** An app resolved into a worktree's stack, with the port it will run on. */
+export interface StackApp {
+  projectId: string;
+  appId: string;
+  /** `projectId::appId`, the key of `Snapshot.states`, `ports` and `logs`. */
+  instance: string;
+  app: string;
+  repo: string;
+  /** The worktree's own checkout, or the main one because the worktree does not hold that repo. */
+  checkout: "worktree" | "main";
+  /** The app runs from the main checkout, shared with every worktree that needs it. */
+  shared: boolean;
+  kind: string;
+  mode: AppMode;
+  port: number | null;
+  /** Where the port came from: this checkout's override, the manifest, the detected app, or nowhere. */
+  portSource: "worktree" | "repo" | "detected" | "none";
+  /** The port without the override, for a reset and for `restart → :N`. */
+  defaultPort: number | null;
+  /** Whether the app's kind can be handed a port at all. */
+  portSettable: boolean;
+  url: string | null;
+  /** The manifest's `env`, with `{port}`, `{port:app}` and `{cwd}` filled in. */
+  env: Record<string, string>;
+}
+
+/** A manifest entry that is not in the scanned worktree, such as a repo the branch never checks out. */
+export interface StackMissing {
+  repo: string;
+  app: string;
+}
+
+export interface ResolvedStack {
+  /** The worktree group id. */
+  worktree: string;
+  label: string;
+  branch: string | null;
+  name: string | null;
+  source: StackSource | null;
+  /** App names the manifest wants opened in the browser once they run. */
+  open: string[];
+  apps: StackApp[];
+  missing: StackMissing[];
+  /** Only when `source` is null: the worktree's service apps, to offer as a manifest. */
+  detected: StackApp[];
+}
+
+/** What one app did when the stack started. */
+export interface StackRun {
+  app: string;
+  instance: string;
+  /** The instance state kind once the wait is over: "running", "failed", ... */
+  state: string;
+  port: number | null;
+  url: string | null;
+  error: string | null;
+  /** Already up, so nothing was started. */
+  reused: boolean;
+}
+
+export interface StackStop {
+  app: string;
+  instance: string;
+  stopped: boolean;
+}
+
+export interface PrChecks {
+  pass: number;
+  fail: number;
+  pending: number;
+  /** The names of the failed checks, at most five. */
+  failing: string[];
+}
+
+/** An open pull request, read from `gh` and cached by the backend. */
+export interface Pr {
+  /** The local repo name (the folder of the checkout). */
+  repo: string;
+  /** `owner/repo` from the git remote. */
+  slug: string;
+  number: number;
+  title: string;
+  head: string;
+  draft: boolean;
+  review: "approved" | "changes" | "pending" | null;
+  url: string;
+  checks: PrChecks;
+}
+
+/** The PRs of the repos that answered, and why the others did not. */
+export interface PrFeed {
+  prs: Pr[];
+  errors: string[];
 }
 
 export interface Group {
@@ -220,6 +327,8 @@ export const api = {
   /** Takes effect the next time the app starts. Returns the new list. */
   setWatch: (repo: string, appId: string, on: boolean) => invoke<string[]>("set_watch", { repo, appId, on }),
   openPort: (port: number) => invoke<void>("open_port", { port }),
+  /** Opens an http(s) link in the user's browser; the webview refuses window.open. */
+  openUrl: (url: string) => invoke<void>("open_url", { url }),
   /** Brings the main window to the front. With an instance it shows only that log; without one it takes over the view the companion saved. */
   companionOpen: (instanceId?: string) => invoke<void>("companion_open", { instance: instanceId ?? null }),
   /** Moves and sizes the companion window in one step, in physical pixels. */
@@ -232,5 +341,19 @@ export const api = {
   companionDrag: () => invoke<void>("companion_drag"),
   /** Stops showing an instance that ended in an error. */
   companionDismiss: (instanceId: string) => invoke<void>("companion_dismiss", { instance: instanceId }),
-  clearLogs: (instanceId?: string) => invoke<void>("clear_logs", { instanceId: instanceId ?? null }),
+  /** The worktree's resolved stack: its spawner.stack.json matched to this checkout's apps. */
+  stack: (worktree: string) => invoke<ResolvedStack>("stack", { worktree }),
+  /** Writes spawner.stack.json from the worktree's detected service apps; refuses when one is already there. */
+  writeStack: (worktree: string, apps?: string[]) => invoke<ResolvedStack>("write_stack", { worktree, apps: apps ?? null }),
+  /** Saves (or, with null, drops) this checkout's port for an app. Takes effect at the next start. */
+  setPort: (projectId: string, appId: string, port: number | null) => invoke<void>("set_port", { projectId, appId, port }),
+  /** The next port above `port` that nothing listens on and no app is assigned. */
+  freePort: (port: number) => invoke<number>("free_port", { port }),
+  /** Starts the stack's service apps (or just `apps`) and waits for each to be running or failed. */
+  startStack: (worktree: string, apps?: string[]) => invoke<StackRun[]>("start_stack", { worktree, apps: apps ?? null }),
+  /** Stops the stack's apps. `keepShared` leaves the ones running from the main checkout alone. */
+  stopStack: (worktree: string, keepShared = false) => invoke<StackStop[]>("stop_stack", { worktree, keepShared }),
+  /** Every open PR of the scanned repos. Read-only, cached by the backend for 60 s. */
+  openPrs: (force = false) => invoke<PrFeed>("open_prs", { force }),
+  clearLogs: (instanceId?: string) => invoke<void>("clear_logs", { instance: instanceId ?? null }),
 };
