@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 pub const FILE: &str = "spawner.stack.json";
 
-/// The app kinds that can be moved to another port, and how `apply_port` moves them. Everything else (tauri, script,
+/// The app kinds that can be moved to another port, and how `apply_port` moves them. Everything else (tauri,
 /// dotnet-test, tasks) keeps the port it was detected with and is shown read-only.
 pub const PORT_KINDS: &[&str] = &["iis-express", "dotnet-run", "vite", "next", "react", "node"];
 
@@ -259,7 +259,7 @@ pub fn apply_port(app: &mut AppDef, port: u16, scheme: &str) -> Result<(), Strin
         "dotnet-run" => vec!["--".into(), "--urls".into(), format!("{}://localhost:{port}", scheme_name(Some(scheme)))],
         "vite" => vec!["--".into(), "--port".into(), port.to_string(), "--strictPort".into()],
         "next" => vec!["--".into(), "-p".into(), port.to_string()],
-        // A script that reads PORT picks it up from the environment; npm itself passes it on.
+        // A Node app that reads PORT picks it up from the environment; npm itself passes it on.
         _ => {
             for step in &mut app.steps {
                 step.env.insert("PORT".into(), port.to_string());
@@ -736,7 +736,7 @@ mod tests {
     }
 
     fn group(id: &str, main: bool, projects: Vec<Project>) -> Group {
-        Group { id: id.into(), label: id.into(), root: None, root_id: "c:/dev".into(), root_path: "C:/dev".into(), main, scripts: false, projects }
+        Group { id: id.into(), label: id.into(), root: None, root_id: "c:/dev".into(), root_path: "C:/dev".into(), main, projects }
     }
 
     fn node_app(name: &str, kind: &str, port: Option<u16>) -> AppDef {
@@ -932,9 +932,9 @@ mod tests {
         tauri_app.kind = "tauri".into();
         let err = apply_port(&mut tauri_app, 1420, "http").unwrap_err();
         assert_eq!(err, "spawner:tauri dev cannot take a port override (tauri)");
-        let mut script = tauri_app.clone();
-        script.kind = "script".into();
-        assert!(apply_port(&mut script, 1, "http").unwrap_err().contains("cannot take a port override"));
+        let mut test_app = tauri_app.clone();
+        test_app.kind = "dotnet-test".into();
+        assert!(apply_port(&mut test_app, 1, "http").unwrap_err().contains("cannot take a port override"));
     }
 
     #[test]

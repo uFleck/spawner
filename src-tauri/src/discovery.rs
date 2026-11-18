@@ -1,4 +1,4 @@
-use crate::detect::{self, discover_apps, discover_apps_in, skipped};
+use crate::detect::{discover_apps, discover_apps_in, skipped};
 use crate::model::{AppDef, Group, Project, Root};
 use crate::roots;
 use std::collections::{HashMap, HashSet};
@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const MAIN_GROUP: &str = "main";
-const SCRIPTS_GROUP: &str = "scripts";
 
 pub struct Found {
     pub repo: String,
@@ -139,11 +138,10 @@ pub fn build_groups(per_root: Vec<(Root, Vec<Found>)>) -> Vec<Group> {
 
 /// A group is one unit of work: a task (`PAYMENT-9986`) holding one project per repo, the repos' main checkouts
 /// when the root also has task worktrees, a lone non-task branch, or else everything else in the root.
-pub fn group_found(mut found: Vec<Found>, root: &Root) -> Vec<Group> {
+pub fn group_found(found: Vec<Found>, root: &Root) -> Vec<Group> {
     let root_path = roots::normalize(&root.path);
     let root_id = roots::key(&root.path);
     let root_name = roots::display_name(root);
-    let scripts = take_scripts(&mut found);
     let task_of = |f: &Found| if f.loose { None } else { task_label(&f.path, f.branch.as_deref()) };
     let has_tasks = found.iter().any(|f| task_of(f).is_some());
     let mut groups: Vec<Group> = Vec::new();
@@ -171,7 +169,6 @@ pub fn group_found(mut found: Vec<Found>, root: &Root) -> Vec<Group> {
                 root_id: root_id.clone(),
                 root_path: root_path.clone(),
                 main,
-                scripts: false,
                 projects: vec![project],
             }),
         }
@@ -181,27 +178,7 @@ pub fn group_found(mut found: Vec<Found>, root: &Root) -> Vec<Group> {
         g.root = task_root(g);
     }
     groups.sort_by_key(|g| (g.main, !is_task_id(&g.id), task_sort_key(&g.id)));
-    if !scripts.is_empty() {
-        groups.push(Group { id: SCRIPTS_GROUP.into(), label: "Scripts".into(), root: None, root_id, root_path, main: false, scripts: true, projects: scripts });
-    }
     groups
-}
-
-/// Moves the scripts (apps from a `spawner.json`) out of what was found, so they never sit between worktrees.
-/// A script file committed in a repo is taken from its main checkout only, not once per worktree.
-fn take_scripts(found: &mut Vec<Found>) -> Vec<Project> {
-    let mut projects = Vec::new();
-    for f in found.iter_mut() {
-        let (scripts, rest): (Vec<AppDef>, Vec<AppDef>) = std::mem::take(&mut f.apps).into_iter().partition(|a| a.kind == detect::scripts::KIND);
-        f.apps = rest;
-        if !scripts.is_empty() && (f.is_main || f.loose) {
-            let path = normalize(&f.path);
-            projects.push(Project { id: format!("{path}#scripts"), repo: f.repo.clone(), path, branch: f.branch.clone(), apps: scripts });
-        }
-    }
-    found.retain(|f| !f.apps.is_empty());
-    projects.sort_by_key(|p| p.repo.to_lowercase());
-    projects
 }
 
 fn task_root(g: &Group) -> Option<String> {
@@ -392,7 +369,7 @@ mod tests {
             k.sort();
             k
         };
-        assert_eq!(keys(&json), ["id", "label", "main", "projects", "root", "rootId", "rootPath", "scripts"]);
+        assert_eq!(keys(&json), ["id", "label", "main", "projects", "root", "rootId", "rootPath"]);
         assert_eq!(keys(&json["projects"][0]), ["apps", "branch", "id", "path", "repo"]);
         assert_eq!(json["root"], "C:/dev/PAYMENT-1");
         assert_eq!(json["rootPath"], "C:/dev");
@@ -421,37 +398,6 @@ mod tests {
         assert_eq!(groups[0].root_path, "C:/dev");
         let repos: Vec<_> = groups[0].projects.iter().map(|p| p.repo.as_str()).collect();
         assert_eq!(repos, ["account", "bill", "scripts"]);
-    }
-
-    fn script_app(name: &str) -> AppDef {
-        AppDef { kind: "script".into(), ..crate::testutil::app(name) }
-    }
-
-    #[test]
-    fn scripts_get_their_own_group_after_the_worktrees_and_only_from_main_checkouts() {
-        let with_scripts = |f: Found, script: &str| Found { apps: vec![crate::testutil::app("web"), script_app(script)], ..f };
-        let groups = grouped(vec![
-            with_scripts(found("bill", "C:/dev/bill", "main", true), "bill tool"),
-            with_scripts(found("bill", "C:/dev/PAYMENT-1/bill", "PAYMENT-1", false), "bill tool"),
-            Found { apps: vec![script_app("cust")], ..loose("tools", "C:/dev/_tools") },
-        ]);
-        let ids: Vec<_> = groups.iter().map(|g| (g.id.as_str(), g.scripts)).collect();
-        assert_eq!(ids, [("PAYMENT-1", false), ("main", false), ("scripts", true)]);
-        assert!(groups.iter().take(2).flat_map(|g| &g.projects).flat_map(|p| &p.apps).all(|a| a.kind != "script"));
-        let scripts = &groups[2];
-        let listed: Vec<_> = scripts.projects.iter().map(|p| (p.repo.as_str(), p.id.as_str(), p.apps[0].name.as_str())).collect();
-        assert_eq!(listed, [("bill", "C:/dev/bill#scripts", "bill tool"), ("tools", "C:/dev/_tools#scripts", "cust")]);
-        assert_eq!(scripts.projects[0].path, "C:/dev/bill", "the project path is the folder the commands run from");
-    }
-
-    #[test]
-    fn a_folder_with_a_spawner_json_is_found_on_disk_as_scripts() {
-        let tmp = TempDir::new("scripts");
-        tmp.file("dev/_tools/spawner.json", r#"{"scripts":[{"name":"cust monitors","command":["python","cust.py","monitors"]}]}"#);
-        let groups = scan_roots(&[root_at(&tmp.path().join("dev"))]);
-        let [group] = groups.as_slice() else { panic!("one group: {groups:?}") };
-        assert!(group.scripts && group.main == false);
-        assert_eq!((group.projects[0].repo.as_str(), group.projects[0].apps[0].name.as_str()), ("_tools", "cust monitors"));
     }
 
     #[test]

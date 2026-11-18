@@ -188,8 +188,6 @@ pub fn apps(manifest: &Value, pm: Pm, rel_dir: &str, folder: &str) -> Vec<AppDef
                     env: Default::default(),
                     ready: if service { READY.iter().map(|r| r.to_string()).collect() } else { Vec::new() },
                 }],
-                description: None,
-                params: Vec::new(),
             }
         })
         .collect()

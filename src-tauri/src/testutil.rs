@@ -81,8 +81,6 @@ pub fn app(name: &str) -> AppDef {
         check_port: false,
         learn_port: false,
         steps: Vec::new(),
-        description: None,
-        params: Vec::new(),
     }
 }
 

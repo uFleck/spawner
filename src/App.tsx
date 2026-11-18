@@ -1,7 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConcludeDialog } from "./components/ConcludeDialog";
-import { RunDialog } from "./components/RunDialog";
 import { loadView } from "./companion/view";
 import { ContextMenuProvider, type MenuItem } from "./components/ContextMenu";
 import { LogPane } from "./components/LogPane";
@@ -277,7 +276,6 @@ export default function App() {
       />
       <SetupGuide open={guide} mcp={snap.mcp} onClose={closeGuide} onToast={showToast} />
       <ConcludeDialog snap={snap} />
-      <RunDialog snap={snap} />
       <div className={`toast${toast.on ? " on" : ""}`}>
         <i className="ph-fill ph-check-circle" />
         <span>{toast.text}</span>

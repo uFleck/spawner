@@ -45,8 +45,8 @@ export function prsFor(group: Group, prs: Pr[]): Pr[] {
   return prs.filter((pr) => group.projects.some((p) => !group.main && p.repo === pr.repo && pr.head === p.branch));
 }
 
-/** The worktrees: scanned groups that are neither the main checkouts nor the user's scripts. */
-export const worktrees = (groups: Group[]) => groups.filter((g) => !g.main && !g.scripts);
+/** The worktrees: scanned groups that are not the main checkouts. */
+export const worktrees = (groups: Group[]) => groups.filter((g) => !g.main);
 
 /** The instance ids whose logs a worktree shows: its stack when one is known, else every app of its checkouts. */
 export function scopeIds(group: Group, stack: ResolvedStack | null): string[] {

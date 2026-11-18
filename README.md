@@ -1,6 +1,6 @@
 # Spawner
 
-Desktop app (Tauri 2 + React) that scans the folders you add for repos, their git worktrees and loose project folders, runs the apps it finds without an IDE, and shows one merged log stream. Supports .NET, Node (Vite, Next, plain scripts) and Tauri; see Supported technologies.
+Desktop app (Tauri 2 + React) that scans the folders you add for repos, their git worktrees and loose project folders, runs the apps it finds without an IDE, and shows one merged log stream. Supports .NET, Node (Vite, Next, plain npm scripts) and Tauri; see Supported technologies.
 
 The sidebar is organized as **worktree > projects > apps**. A worktree is one unit of work: a task folder such as `PAYMENT-9986` holding one project (repo checkout) per repo, plus a `main` group with every repo's main checkout.
 
@@ -119,7 +119,7 @@ A worktree with an open PR is listed first in the sidebar (**In review**, read f
 - `repo` is the repo's folder name. An app from a repo the worktree does not hold runs from that repo's main checkout, shared with other worktrees.
 - `port` is the repo default. Changing a port in the window (Edit ports) or with `hub_set_port` saves an override for that one checkout in `ports.json` in the app data directory; it is never written to the manifest or committed.
 - `env` links apps: `{port:<app name>}` is the other app's resolved port, `{port}` the app's own, `{cwd}` its folder, so a moved port follows. An unknown name is an error at start.
-- Only `iis-express`, `dotnet-run`, `vite`, `next`, `react` and `node` services take a port. Tauri apps, scripts and tasks cannot; leave `port` out for them.
+- Only `iis-express`, `dotnet-run`, `vite`, `next`, `react` and `node` services take a port. Tauri apps and tasks cannot; leave `port` out for them.
 
 A repo without a manifest shows the apps Spawner detected, with the ones already running ticked; **Save as stack** writes the ones you keep to `spawner.stack.json`, and **Copy AI prompt…** previews the schema handed to an agent, with a copy button. Stacks replace the old presets: the window no longer shows a Presets section, and the preset tools below still read what earlier versions saved.
 

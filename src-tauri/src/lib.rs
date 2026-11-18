@@ -6,11 +6,11 @@ mod job;
 mod level;
 mod mcp;
 mod model;
-mod notify;
 mod presets;
 mod review;
 mod roots;
 mod runner;
+mod settings;
 mod stack;
 mod watch;
 mod worktree;
@@ -19,8 +19,8 @@ mod testutil;
 
 use companion::Companion;
 use model::{Group, InstanceState, LogLine, Root};
-use notify::{Notifier, Settings};
 use runner::{Hub, HubEvent};
+use settings::{Settings, SettingsStore};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -30,7 +30,6 @@ use tauri::menu::{CheckMenuItem, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
-use tauri_plugin_notification::NotificationExt;
 
 /// Passed by the login entry so Spawner can start hidden in the tray.
 const AUTOSTART_ARG: &str = "--autostart";
@@ -151,14 +150,14 @@ fn set_watch(hub: State<'_, Arc<Hub>>, repo: String, app_id: String, on: bool) -
 }
 
 #[tauri::command]
-fn get_settings(notifier: State<'_, Arc<Notifier>>) -> Settings {
-    notifier.settings()
+fn get_settings(store: State<'_, Arc<SettingsStore>>) -> Settings {
+    store.settings()
 }
 
 /// Every window keeps its own copy of the settings, so a change is sent to all of them.
 #[tauri::command]
-fn set_settings(app: AppHandle, notifier: State<'_, Arc<Notifier>>, companion: State<'_, Arc<Companion>>, settings: Settings) -> Result<(), String> {
-    notifier.save(settings)?;
+fn set_settings(app: AppHandle, store: State<'_, Arc<SettingsStore>>, companion: State<'_, Arc<Companion>>, settings: Settings) -> Result<(), String> {
+    store.save(settings)?;
     companion.set_enabled(&app, settings.companion);
     let _ = app.emit("settings-changed", settings);
     Ok(())
@@ -232,8 +231,8 @@ fn open_url(url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn start(hub: State<'_, Arc<Hub>>, project_id: String, app_id: String, force: Option<bool>, params: Option<HashMap<String, String>>) -> Result<(), String> {
-    hub.inner().start_with(&project_id, &app_id, force.unwrap_or(false), &params.unwrap_or_default(), &[])
+fn start(hub: State<'_, Arc<Hub>>, project_id: String, app_id: String, force: Option<bool>) -> Result<(), String> {
+    hub.inner().start_with(&project_id, &app_id, force.unwrap_or(false))
 }
 
 #[tauri::command]
@@ -315,17 +314,6 @@ async fn open_prs(hub: State<'_, Arc<Hub>>, force: Option<bool>) -> Result<revie
 fn clear_logs(app: AppHandle, hub: State<'_, Arc<Hub>>, instance_id: Option<String>) {
     hub.clear_logs(instance_id.as_deref());
     let _ = app.emit("logs-cleared", instance_id);
-}
-
-/// Tells the user about a script's state change, unless they are looking at Spawner already.
-fn notify_script(app: &AppHandle, notifier: &Notifier, event: &model::StateEvent) {
-    let Some(hub) = app.try_state::<Arc<Hub>>() else { return };
-    let Some(name) = hub.script_name(&event.id) else { return };
-    let Some((title, body)) = notifier.note(&event.id, &name, &event.state) else { return };
-    let focused = app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false));
-    if !focused {
-        let _ = app.notification().builder().title(title).body(body).show();
-    }
 }
 
 fn show_main_window(app: &AppHandle) {
@@ -414,7 +402,7 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main_window(app)))
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init())
+
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![AUTOSTART_ARG])))
         .on_window_event(|window, event| {
             if window.label() != "main" {
@@ -446,14 +434,13 @@ pub fn run() {
             }
             let handle = app.handle().clone();
             let roots_file = data_file(app.handle(), roots::FILE_NAME)?;
-            let notifier = Arc::new(Notifier::load(data_file(app.handle(), notify::FILE_NAME)?));
-            app.manage(notifier.clone());
-            let companion = Arc::new(Companion::new(notifier.settings().companion));
+            let store = Arc::new(SettingsStore::load(data_file(app.handle(), settings::FILE_NAME)?));
+            app.manage(store.clone());
+            let companion = Arc::new(Companion::new(store.settings().companion));
             app.manage(companion.clone());
             let hub = Hub::new(roots::load(&roots_file, env_roots().as_deref()), move |event| {
                 let _ = match event {
                     HubEvent::State(s) => {
-                        notify_script(&handle, &notifier, &s);
                         companion.on_state(&handle, &s);
                         handle.emit("instance-state", s)
                     }

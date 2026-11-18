@@ -212,7 +212,7 @@ function aiPrompt(group: Group, stack: ResolvedStack): string {
     "- `repo` is the repo folder name; an app from a repo this worktree does not hold runs from its main checkout.",
     "- `port` is the repo default. A per-worktree port is an override that Spawner keeps in its app data (Edit ports, or hub_set_port); it is never written to this file or committed.",
     "- When one app calls another, link them with `env` and `{port:<app name>}` instead of hard-coding the port, so a moved port follows. `{port}` is the app's own port, `{cwd}` its folder.",
-    "- Only iis-express, dotnet-run, vite, next, react and node apps can take a port; leave `port` out for the rest (tauri, scripts, tasks).",
+    "- Only iis-express, dotnet-run, vite, next, react and node apps can take a port; leave `port` out for the rest (tauri, tasks).",
     "",
     `Apps Spawner detected in ${path}:`,
     apps || "- (none)",

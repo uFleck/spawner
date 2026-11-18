@@ -11,7 +11,6 @@ import {
   type InstanceState,
   type Level,
   type LogLine,
-  type Param,
   type PortEvent,
   type Pr,
   type Project,
@@ -31,14 +30,14 @@ const TASK_IDS = new Set<string>();
 const app = (name: string, port: number | null = null, kind = "dotnet-run", mode: AppMode = "service"): AppDef => {
   const id = `${name}.csproj`;
   if (mode === "task") TASK_IDS.add(id);
-  return { id, name, project: `${name}/${name}.csproj`, kind, mode, port, checkPort: kind === "iis-express", learnPort: false, steps: [], description: null, params: [] };
+  return { id, name, project: `${name}/${name}.csproj`, kind, mode, port, checkPort: kind === "iis-express", learnPort: false, steps: [] };
 };
 
 /** A package.json script, named and identified the way the Node detector does (`<package>:<script>`, `package.json#<script>`). */
 const script = (pkg: string, name: string, kind: string, mode: AppMode = "service"): AppDef => {
   const id = `package.json#${name}`;
   if (mode === "task") TASK_IDS.add(id);
-  return { id, name: `${pkg}:${name}`, project: "package.json", kind, mode, port: null, checkPort: false, learnPort: mode === "service", steps: [], description: null, params: [] };
+  return { id, name: `${pkg}:${name}`, project: "package.json", kind, mode, port: null, checkPort: false, learnPort: mode === "service", steps: [] };
 };
 
 /** The Tauri detector's app: the whole desktop app, where `dev` above is the web front end alone. */
@@ -52,16 +51,7 @@ const tauriDev = (pkg: string): AppDef => ({
   checkPort: false,
   learnPort: true,
   steps: [],
-  description: null,
-  params: [],
 });
-
-/** A command declared in a spawner.json: a task named by the user, with what it is for. */
-const customScript = (name: string, description: string | null, broken = false, params: Param[] = []): AppDef => {
-  const id = `spawner.json#${name.replace(/\W+/g, "-")}`;
-  TASK_IDS.add(id);
-  return { id, name, project: "spawner.json", kind: "script", mode: "task", port: null, checkPort: false, learnPort: false, steps: broken ? [] : [{ program: { type: "path", name: "python" }, args: [], cwd: ".", ready: [] }], description, params };
-};
 
 /** Dev servers pick their own port; the mock hands out the one Vite uses in this repo. */
 const DEV_PORT = 1420;
@@ -95,30 +85,8 @@ const task = (id: string, projects: (root: string) => Group["projects"]): Group 
   rootId: "c:/dev",
   rootPath: "C:/dev",
   main: false,
-  scripts: false,
   projects: projects(`C:/dev/${id}`),
 });
-
-const DEV_SCRIPTS: Group = {
-  id: "scripts",
-  label: "Scripts",
-  root: null,
-  rootId: "c:/dev",
-  rootPath: "C:/dev",
-  main: false,
-  scripts: true,
-  projects: [
-    project("C:/dev", "_tools", null, [
-      customScript("cust monitors", "Counts and ids of the global Bill monitor lists."),
-      customScript("cust snapshot", "Read-only customer snapshot.", false, [
-        { name: "who", kind: "text", hint: "Email, walletId or appUserId of the customer", placeholder: "ana@example.com", flag: null, options: [], required: true, default: null },
-        { name: "out", kind: "text", hint: "Write the snapshot to this file instead of the log", placeholder: "snapshot.json", flag: "--out", options: [], required: false, default: null },
-        { name: "env", kind: "text", hint: "Which environment to read", placeholder: null, flag: "--env", options: ["prod", "staging"], required: false, default: "staging" },
-        { name: "verbose", kind: "flag", hint: "Print every request", placeholder: null, flag: "-v", options: [], required: false, default: null },
-      ]),
-    ]),
-  ],
-};
 
 const DEV_GROUPS: Group[] = [
   task("PAYMENT-10138", (r) => [account(r, "PAYMENT-10138")]),
@@ -138,7 +106,6 @@ const DEV_GROUPS: Group[] = [
     rootId: "c:/dev",
     rootPath: "C:/dev",
     main: true,
-    scripts: false,
     projects: [
       account("C:/dev", "main"),
       bill("C:/dev", "main"),
@@ -154,9 +121,7 @@ const DEV_GROUPS: Group[] = [
 ];
 
 const DEV = "C:/dev";
-/** `?noscripts` starts without any script, to show the empty state. */
-const EMPTY_SCRIPTS = new URLSearchParams(location.search).has("noscripts");
-let settings = { notifyScripts: false, companion: true };
+let settings = { companion: true };
 let startOnLogin = false;
 const watched = new Set<string>();
 const SAMPLE_FOLDERS = ["D:/side/notes-api", "C:/scripts/nightly", "C:/work/clients"];
@@ -263,7 +228,7 @@ let flaky = "PAYMENT-9474";
 function groupsFor(roots: Root[]): Group[] {
   return roots.flatMap((root) => {
     if (normalize(root.path).toLowerCase() === DEV.toLowerCase())
-      return [...DEV_GROUPS, ...(EMPTY_SCRIPTS ? [] : [DEV_SCRIPTS])].flatMap((g) => {
+      return DEV_GROUPS.flatMap((g) => {
         const projects = g.projects.filter((p) => !concluded.has(p.id));
         return projects.length ? [{ ...g, projects }] : [];
       });
@@ -277,7 +242,6 @@ function groupsFor(roots: Root[]): Group[] {
         rootId: folder.toLowerCase(),
         rootPath: folder,
         main: false,
-        scripts: false,
         projects: [{ id: folder, repo: name, path: folder, branch: null, apps: [app(`${name}.Worker`)] }],
       },
     ];
@@ -413,17 +377,11 @@ export function installMock() {
     log(id, "sys", `exited (code ${code})`);
     setState(id, { kind: "exited", code });
   }
-  async function start(
-    projectId: string,
-    appId: string,
-    params: Record<string, string> | null = null,
-    opts: { port?: number | null; scheme?: string } = {},
-  ) {
+  async function start(projectId: string, appId: string, opts: { port?: number | null; scheme?: string } = {}) {
     const id = `${projectId}::${appId}`;
     const name = appId.replace(".csproj", "");
     const port = opts.port ?? null;
     const scheme = opts.scheme ?? "http";
-    if (params) log(id, "sys", `params: ${JSON.stringify(params)}`);
     // The backend refuses a port something else holds, before it builds: the same message the card recognises.
     const holder = port == null ? null : holderOf(port, id);
     if (holder) {
@@ -625,7 +583,7 @@ export function installMock() {
         if (isActive(running)) {
           return { app: x.app, instance: x.instance, state: running.kind, port: x.port, url: x.url, error: null, reused: true };
         }
-        await start(x.projectId, x.appId, null, {
+        await start(x.projectId, x.appId, {
           port: x.port,
           scheme: x.url?.startsWith("https") ? "https" : "http",
         });
@@ -740,7 +698,7 @@ export function installMock() {
     },
     start: (a) => {
       const resolved = resolvedPort(a.projectId as string, a.appId as string);
-      return void start(a.projectId as string, a.appId as string, a.params as Record<string, string> | null, resolved);
+      return void start(a.projectId as string, a.appId as string, resolved);
     },
     stop: (a) => void stop(a.instanceId as string),
 

@@ -63,11 +63,11 @@ static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
 
 /// The `(repo, path)` pairs to ask `gh` about: one per repo, preferring a main checkout, since the slug comes from the
 /// remote and a worktree is as good as any other only until it is removed. One entry per repo also keeps a repo with
-/// several worktrees from listing the same PRs twice. Scripts are not repos.
+/// several worktrees from listing the same PRs twice.
 pub fn checkouts(groups: &[Group]) -> Vec<(String, String)> {
     let mut repos: Vec<(String, String)> = Vec::new();
     let mut main_paths: HashMap<String, String> = HashMap::new();
-    for group in groups.iter().filter(|g| !g.scripts) {
+    for group in groups {
         for project in &group.projects {
             let key = project.repo.to_lowercase();
             if group.main {
@@ -400,17 +400,14 @@ mod tests {
             root_id: "c:/dev".into(),
             root_path: "C:/dev".into(),
             main,
-            scripts: false,
             projects,
         };
         let groups = vec![
             group("PAYMENT-1", false, vec![project("C:/dev/PAYMENT-1/bill", "bill"), project("C:/dev/PAYMENT-1/shop", "shop")]),
             group("main", true, vec![project("C:/dev/bill", "bill")]),
-            Group { scripts: true, ..group("scripts", false, vec![project("C:/dev/tools#scripts", "tools")]) },
         ];
         let found = checkouts(&groups);
         assert_eq!(found, [("bill".to_string(), "C:/dev/bill".to_string()), ("shop".to_string(), "C:/dev/PAYMENT-1/shop".to_string())]);
-        assert!(found.iter().all(|(repo, _)| repo != "tools"), "Scripts is not a repo with PRs");
     }
 
     #[test]

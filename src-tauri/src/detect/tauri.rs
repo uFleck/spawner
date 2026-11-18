@@ -64,8 +64,6 @@ pub fn app_def(runner: Option<Pm>, rel_dir: &str, config: &str, package: &str) -
         check_port: false,
         learn_port: true,
         steps: vec![StepSpec { program, args, cwd, env: Default::default(), ready: READY.iter().map(|r| r.to_string()).collect() }],
-        description: None,
-        params: Vec::new(),
     }
 }
 

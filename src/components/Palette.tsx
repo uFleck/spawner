@@ -28,7 +28,6 @@ export function Palette({ open, snap, onClose, onToggleSide, onTheme, onToast, o
   const commands = useMemo<Command[]>(() => {
     const list: Command[] = [];
     for (const g of snap.groups) {
-      if (g.scripts) continue;
       const where = g.main ? "main" : g.label;
       for (const p of g.projects)
         for (const a of p.apps) {

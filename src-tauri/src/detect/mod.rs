@@ -4,7 +4,6 @@
 
 pub mod dotnet;
 pub mod node;
-pub mod scripts;
 pub mod tauri;
 
 use crate::model::{AppDef, Program};
@@ -48,8 +47,7 @@ pub trait Detector: Sync {
 }
 
 /// Tried in this order for every directory, so an earlier detector can claim a directory ahead of a later one.
-/// `scripts` is first because it never claims a directory, and a `spawner.json` must be read wherever it sits.
-static DETECTORS: &[&dyn Detector] = &[&scripts::Scripts, &dotnet::Dotnet, &node::Node, &tauri::Tauri];
+static DETECTORS: &[&dyn Detector] = &[&dotnet::Dotnet, &node::Node, &tauri::Tauri];
 
 /// Everything runnable under `dir`, found by descending at most `MAX_DEPTH` folders. The seam `discovery` uses.
 pub fn discover_apps(dir: &Path) -> Vec<AppDef> {

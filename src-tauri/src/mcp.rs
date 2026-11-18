@@ -1,8 +1,7 @@
 //! MCP server (Streamable HTTP, JSON responses only) so an AI agent drives the same Hub the user is watching.
 //! Every start, stop and log line goes through `Hub`, so nothing an agent runs escapes the UI.
 
-use crate::detect;
-use crate::model::{AppDef, AppMode, Group, InstanceState, Level, LogLine, Root, instance_id};
+use crate::model::{AppDef, AppMode, Group, InstanceState, Level, LogLine, instance_id};
 use crate::presets::{self, MAIN, Member, Preset};
 use crate::runner::Hub;
 use axum::body::Bytes;
@@ -29,13 +28,12 @@ const STOP_TIMEOUT: u64 = 20;
 const PORT_GRACE: Duration = Duration::from_secs(3);
 const FAILED_LINES: usize = 10;
 
-const INSTRUCTIONS: &str = "Spawner runs and tracks the user's apps and scripts across the folders the user added to it, and the git worktrees in them. \
+const INSTRUCTIONS: &str = "Spawner runs and tracks the user's apps across the folders the user added to it, and the git worktrees in them. \
 Use these tools instead of running dev servers or builds in a terminal, so the user sees every process and log in the Spawner window. \
 Call hub_list_apps first. Select an app by `app` (plus `worktree` or `repo` when the name is ambiguous), by `path` (your working directory), or by `instance`. \
 hub_start waits until a service is running, or a task has finished, or it has failed, and returns the log lines from that run. Use hub_logs with `since_seq` to poll for new output. \
 The user also saves groups of apps as presets: hub_list_presets shows them, and hub_start_preset runs one in a worktree. \
-A worktree can also have a stack (its committed spawner.stack.json, with per-checkout port overrides): hub_get_stack shows it, hub_set_port moves one app's port, hub_start_stack runs the whole stack at once with the ports linked through its env, and hub_stop_stack stops it. \
-To run your own script (a Python tool, a PowerShell helper) here, it has to be declared in a spawner.json: call hub_script_guide first, and do not run such scripts in a terminal.";
+A worktree can also have a stack (its committed spawner.stack.json, with per-checkout port overrides): hub_get_stack shows it, hub_set_port moves one app's port, hub_start_stack runs the whole stack at once with the ports linked through its env, and hub_stop_stack stops it.";
 
 /// Ports to try, best first. The last port that worked comes before the default so a client config
 /// that was written once keeps working; port 0 asks the OS for any free port, so binding cannot fail on a busy port.
@@ -188,9 +186,7 @@ fn tool_definitions() -> Value {
             "inputSchema": with_target(json!({
                 "wait": {"type": "boolean", "description": "Wait for a service to be running, or a task to finish. Default true."},
                 "timeout_seconds": {"type": "integer", "description": format!("How long to wait. Default {START_TIMEOUT}.")},
-                "log_lines": {"type": "integer", "description": "Log lines to return from this run. Default 40. 0 returns the status only (a failed run still shows 10)."},
-                "params": {"type": "object", "additionalProperties": true, "description": "Values for a script's declared params, by param name (see `params` in hub_list_apps): {\"who\": \"ana@example.com\", \"verbose\": true}. A missing required param is refused before the script starts. Scripts only."},
-                "args": {"type": "array", "items": {"type": "string"}, "description": "Extra arguments appended to a script's command, after its params, for a script that documents a usage instead of params. Scripts only."}
+                "log_lines": {"type": "integer", "description": "Log lines to return from this run. Default 40. 0 returns the status only (a failed run still shows 10)."}
             }))
         },
         {
@@ -256,7 +252,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "hub_set_port",
-            "description": "Save the port one stack app runs on. The override belongs to this checkout and is never committed; `port` null clears it and goes back to the manifest or detected port. Returns the port and its port_source. Refused for the kinds that cannot take one (tauri, scripts, tasks).",
+            "description": "Save the port one stack app runs on. The override belongs to this checkout and is never committed; `port` null clears it and goes back to the manifest or detected port. Returns the port and its port_source. Refused for the kinds that cannot take one (tauri, tasks).",
             "inputSchema": {"type": "object", "properties": {
                 "worktree": {"type": "string", "description": "Worktree id or label, such as \"PAYMENT-10138\". Case-insensitive."},
                 "app": {"type": "string", "description": "App name as hub_get_stack lists it, such as \"Acme.Bill.API\" or \"Bill.API\". Case-insensitive."},
@@ -281,11 +277,6 @@ fn tool_definitions() -> Value {
                 "worktree": {"type": "string", "description": "Worktree id or label, such as \"PAYMENT-10138\". Case-insensitive."},
                 "keep_shared": {"type": "boolean", "description": "Leave the apps that run from a shared main checkout. Default true."}
             }, "required": ["worktree"]}
-        },
-        {
-            "name": "hub_script_guide",
-            "description": "How to make a script show up in Spawner: where to put its spawner.json, the format, and what a script that suits Spawner does. Call this before writing or running a script that hub_list_apps does not list, and when the user asks to wire up their scripts.",
-            "inputSchema": {"type": "object", "properties": {}}
         },
         {
             "name": "hub_rescan",
@@ -317,22 +308,6 @@ struct StartArgs {
     wait: Option<bool>,
     timeout_seconds: Option<u64>,
     log_lines: Option<usize>,
-    args: Option<Vec<String>>,
-    params: Option<HashMap<String, Value>>,
-}
-
-/// Param values by name as text; an agent may give a number or a boolean for one.
-fn param_values(params: Option<HashMap<String, Value>>) -> Result<HashMap<String, String>, String> {
-    params
-        .unwrap_or_default()
-        .into_iter()
-        .map(|(k, v)| match v {
-            Value::String(s) => Ok((k, s)),
-            Value::Bool(_) | Value::Number(_) => Ok((k, v.to_string())),
-            Value::Null => Ok((k, String::new())),
-            _ => Err(format!("param `{k}` must be a string, number or boolean")),
-        })
-        .collect()
 }
 
 #[derive(Deserialize, Default)]
@@ -505,19 +480,9 @@ async fn resolve(hub: &Arc<Hub>, t: &Target) -> Result<Hit, String> {
     }
     let known = all_hits(&groups);
     Err(format!(
-        "no app matches {t:?}. Known apps:\n{}\nIf this is a script of your own, Spawner only runs scripts declared in a spawner.json: call hub_script_guide to see how.",
+        "no app matches {t:?}. Known apps:\n{}",
         if known.is_empty() { "  (no runnable apps found)".into() } else { describe_hits(&known) }
     ))
-}
-
-/// The script guide, with the folders Spawner scans so the agent knows where a `spawner.json` can go.
-fn script_guide(roots: &[Root]) -> String {
-    let folders = if roots.is_empty() {
-        "  (none yet: the user adds one in the Spawner window)".to_string()
-    } else {
-        roots.iter().map(|r| format!("  {}", r.path)).collect::<Vec<_>>().join("\n")
-    };
-    format!("{}\n\nFolders Spawner scans:\n{folders}", detect::scripts::GUIDE)
 }
 
 struct Out {
@@ -585,8 +550,6 @@ fn list_json(
                                 "url": port.map(|port| format!("http://localhost:{port}")),
                                 "state": kind(state),
                                 "detail": state.map(InstanceState::describe),
-                                "description": a.description,
-                                "params": (!a.params.is_empty()).then_some(&a.params),
                                 "instance": id,
                             }))
                         })
@@ -594,14 +557,10 @@ fn list_json(
                     (!apps.is_empty()).then(|| json!({"repo": p.repo, "branch": p.branch, "path": p.path, "apps": apps}))
                 })
                 .collect();
-            (!projects.is_empty()).then(|| json!({"worktree": g.id, "label": g.label, "root": g.root, "root_path": g.root_path, "main": g.main, "scripts": g.scripts, "projects": projects}))
+            (!projects.is_empty()).then(|| json!({"worktree": g.id, "label": g.label, "root": g.root, "root_path": g.root_path, "main": g.main, "projects": projects}))
         })
         .collect();
-    if groups.iter().any(|g| g.scripts) {
-        json!({"worktrees": worktrees})
-    } else {
-        json!({"worktrees": worktrees, "hint": "No scripts are registered. To run your own scripts in Spawner, call hub_script_guide."})
-    }
+    json!({"worktrees": worktrees})
 }
 
 fn clock(ts: u64) -> String {
@@ -712,12 +671,12 @@ async fn wait_for_port(hub: &Arc<Hub>, id: &str) {
     }
 }
 
-async fn start_flow(hub: &Arc<Hub>, hit: &Hit, values: &HashMap<String, String>, extra: &[String], wait: bool, timeout: Duration, lines: usize) -> Out {
+async fn start_flow(hub: &Arc<Hub>, hit: &Hit, wait: bool, timeout: Duration, lines: usize) -> Out {
     if let Some(s) = hub.states().get(&hit.instance).filter(|s| s.is_active()) {
         return ok(format!("{} is already {}. Use hub_restart to rebuild it.", hit.label(), s.describe()));
     }
     let before = hub.last_seq();
-    if let Err(e) = hub.start_with(&hit.project_id, &hit.app.id, false, values, extra) {
+    if let Err(e) = hub.start_with(&hit.project_id, &hit.app.id, false) {
         return bad(format!("could not start {}: {e}", hit.label()));
     }
     hub.note(&hit.instance, "started via MCP");
@@ -845,7 +804,7 @@ async fn start_preset(hub: &Arc<Hub>, a: PresetArgs) -> Out {
         .cloned()
         .map(|hit| {
             let hub = hub.clone();
-            tokio::spawn(async move { start_flow(&hub, &hit, &HashMap::new(), &[], wait, timeout, lines).await })
+            tokio::spawn(async move { start_flow(&hub, &hit, wait, timeout, lines).await })
         })
         .collect();
     let mut results = Vec::new();
@@ -1076,13 +1035,12 @@ async fn call_tool(hub: &Arc<Hub>, params: &Value) -> Result<Value, (i32, String
             let a: StartArgs = serde_json::from_value(args).map_err(invalid)?;
             let timeout = Duration::from_secs(a.timeout_seconds.unwrap_or(START_TIMEOUT).clamp(1, 600));
             let lines = a.log_lines.unwrap_or(40).min(MAX_TAIL);
-            let extra = a.args.clone().unwrap_or_default();
-            match (param_values(a.params.clone()), resolve(hub, &a.target).await) {
-                (Err(e), _) | (_, Err(e)) => bad(e),
-                (Ok(values), Ok(hit)) if name == "hub_start" => start_flow(hub, &hit, &values, &extra, a.wait.unwrap_or(true), timeout, lines).await,
-                (Ok(values), Ok(hit)) => {
+            match resolve(hub, &a.target).await {
+                Err(e) => bad(e),
+                Ok(hit) if name == "hub_start" => start_flow(hub, &hit, a.wait.unwrap_or(true), timeout, lines).await,
+                Ok(hit) => {
                     let stopped = stop_flow(hub, &hit).await;
-                    if stopped.error { stopped } else { start_flow(hub, &hit, &values, &extra, true, timeout, lines).await }
+                    if stopped.error { stopped } else { start_flow(hub, &hit, true, timeout, lines).await }
                 }
             }
         }
@@ -1125,7 +1083,6 @@ async fn call_tool(hub: &Arc<Hub>, params: &Value) -> Result<Value, (i32, String
         "hub_set_port" => set_port(hub, serde_json::from_value(args).map_err(invalid)?).await,
         "hub_start_stack" => start_stack(hub, serde_json::from_value(args).map_err(invalid)?).await,
         "hub_stop_stack" => stop_stack(hub, serde_json::from_value(args).map_err(invalid)?).await,
-        "hub_script_guide" => ok(script_guide(&hub.roots())),
         "hub_rescan" => {
             let groups = hub.rescan().await;
             let projects: usize = groups.iter().map(|g| g.projects.len()).sum();
@@ -1209,7 +1166,6 @@ mod tests {
                 root_id: "c:/dev".into(),
                 root_path: "C:/dev".into(),
                 main: false,
-                scripts: false,
                 projects: vec![project("C:/dev/PAYMENT-9986", "bill", vec![app("Acme.Bill.API")]), project("C:/dev/PAYMENT-9986", "account", vec![app("Acme.Account.App")])],
             },
             Group {
@@ -1219,7 +1175,6 @@ mod tests {
                 root_id: "c:/dev".into(),
                 root_path: "C:/dev".into(),
                 main: true,
-                scripts: false,
                 projects: vec![project("C:/dev", "bill", vec![app("Acme.Bill.API")])],
             },
         ]
@@ -1411,7 +1366,6 @@ mod tests {
             root_id: path.clone(),
             root_path: path.clone(),
             main: false,
-            scripts: false,
             projects: vec![Project {
                 id: path.clone(),
                 repo: "demo".into(),
@@ -1469,84 +1423,28 @@ mod tests {
     fn hub_with(app: &AppDef) -> (Arc<Hub>, Hit) {
         let hub = Hub::new(Vec::new(), |_| {});
         let project = Project { id: "p".into(), repo: "r".into(), path: "p".into(), branch: None, apps: vec![app.clone()] };
-        let group = Group { id: "g".into(), label: "g".into(), root: None, root_id: "r".into(), root_path: "r".into(), main: false, scripts: false, projects: vec![project] };
+        let group = Group { id: "g".into(), label: "g".into(), root: None, root_id: "r".into(), root_path: "r".into(), main: false, projects: vec![project] };
         hub.set_groups(vec![group]);
         let hit = all_hits(&hub.groups()).remove(0);
         (hub, hit)
     }
 
     #[tokio::test]
-    async fn a_script_takes_extra_arguments_and_nothing_else_does() {
-        let mut script = cmd_task("echo");
-        script.kind = "script".into();
-        let (hub, hit) = hub_with(&script);
-        let out = start_flow(&hub, &hit, &HashMap::new(), &["snapshot".into(), "a@b.c".into()], true, Duration::from_secs(10), 40).await;
-        assert!(!out.error && out.text.contains("snapshot a@b.c"), "{}", out.text);
-
-        let (hub, hit) = hub_with(&cmd_task("echo"));
-        let out = start_flow(&hub, &hit, &HashMap::new(), &["x".into()], true, Duration::from_secs(10), 40).await;
-        assert!(out.error && out.text.contains("takes no extra arguments"), "{}", out.text);
-        let out = start_flow(&hub, &hit, &HashMap::from([("x".into(), "1".into())]), &[], true, Duration::from_secs(10), 40).await;
-        assert!(out.error && out.text.contains("takes no extra arguments"), "{}", out.text);
-    }
-
-    #[tokio::test]
-    async fn a_script_with_params_is_refused_without_its_required_value_and_runs_with_it() {
-        let mut script = cmd_task("echo");
-        script.kind = "script".into();
-        script.params = vec![crate::model::Param {
-            name: "who".into(),
-            kind: crate::model::ParamKind::Text,
-            hint: Some("Email of the customer".into()),
-            placeholder: None,
-            flag: Some("--who".into()),
-            options: Vec::new(),
-            required: true,
-            default: None,
-        }];
-        let (hub, hit) = hub_with(&script);
-        let out = start_flow(&hub, &hit, &HashMap::new(), &[], true, Duration::from_secs(10), 40).await;
-        assert!(out.error && out.text.contains("missing required parameter `who`: Email of the customer"), "{}", out.text);
-        assert!(hub.states().is_empty(), "nothing ran");
-
-        let values = param_values(Some(HashMap::from([("who".to_string(), json!("a@b.c"))]))).unwrap();
-        let out = start_flow(&hub, &hit, &values, &[], true, Duration::from_secs(10), 40).await;
-        assert!(!out.error && out.text.contains("--who a@b.c"), "{}", out.text);
-
-        assert_eq!(param_values(Some(HashMap::from([("n".to_string(), json!(3)), ("v".to_string(), json!(true)), ("z".to_string(), json!(null))]))).unwrap(), HashMap::from([("n".to_string(), "3".to_string()), ("v".to_string(), "true".to_string()), ("z".to_string(), String::new())]));
-        assert!(param_values(Some(HashMap::from([("l".to_string(), json!(["a"]))]))).is_err());
-    }
-
-    #[test]
-    fn the_guide_names_the_folders_spawner_scans_and_the_listing_hints_until_scripts_exist() {
-        let guide = script_guide(&[Root { path: "C:/umbler".into(), label: None }]);
-        assert!(guide.contains("spawner.json") && guide.ends_with("C:/umbler"), "{guide}");
-        assert!(script_guide(&[]).contains("the user adds one in the Spawner window"));
-
-        let groups = groups();
-        let listed = list_json(&groups, &HashMap::new(), &HashMap::new(), None, false);
-        assert!(listed["hint"].as_str().unwrap().contains("hub_script_guide"));
-        let mut with_scripts = groups;
-        with_scripts[0].scripts = true;
-        assert!(list_json(&with_scripts, &HashMap::new(), &HashMap::new(), None, false).get("hint").is_none());
-    }
-
-    #[tokio::test]
     async fn starting_a_task_waits_for_its_exit_and_reports_the_code_and_log() {
         let (hub, hit) = hub_with(&cmd_task("echo compiling&& exit 2"));
-        let out = start_flow(&hub, &hit, &HashMap::new(), &[], true, Duration::from_secs(10), 40).await;
+        let out = start_flow(&hub, &hit, true, Duration::from_secs(10), 40).await;
         assert!(out.error, "a nonzero exit is an error result");
         assert!(out.text.contains("exited (code 2)") && out.text.contains("compiling"), "{}", out.text);
 
         let (hub, hit) = hub_with(&cmd_task("echo fine"));
-        let out = start_flow(&hub, &hit, &HashMap::new(), &[], true, Duration::from_secs(10), 40).await;
+        let out = start_flow(&hub, &hit, true, Duration::from_secs(10), 40).await;
         assert!(!out.error && out.text.contains("exited (code 0)") && out.text.contains("fine"), "{}", out.text);
     }
 
     #[tokio::test]
     async fn a_task_still_running_at_the_timeout_is_not_reported_as_up() {
         let (hub, hit) = hub_with(&cmd_task("ping -n 30 127.0.0.1 >nul"));
-        let out = start_flow(&hub, &hit, &HashMap::new(), &[], true, Duration::from_secs(1), 40).await;
+        let out = start_flow(&hub, &hit, true, Duration::from_secs(1), 40).await;
         assert!(!out.error && out.text.contains("still running after"), "{}", out.text);
         assert!(!out.text.contains("localhost"), "{}", out.text);
         hub.stop_all();
@@ -1559,7 +1457,7 @@ mod tests {
         task.kind = "custom".into();
         task.mode = AppMode::Task;
         let project = Project { id: "p".into(), repo: "r".into(), path: "p".into(), branch: None, apps: vec![app("web"), task] };
-        let group = Group { id: "g".into(), label: "g".into(), root: None, root_id: "r".into(), root_path: "r".into(), main: false, scripts: false, projects: vec![project] };
+        let group = Group { id: "g".into(), label: "g".into(), root: None, root_id: "r".into(), root_path: "r".into(), main: false, projects: vec![project] };
         let json = list_json(&[group], &HashMap::new(), &HashMap::new(), None, false);
         let apps = &json["worktrees"][0]["projects"][0]["apps"];
         assert_eq!((apps[0]["kind"].as_str(), apps[0]["mode"].as_str()), (Some("dotnet-run"), Some("service")));
@@ -1573,7 +1471,7 @@ mod tests {
         let mut fixed = app("fixed");
         fixed.port = Some(7398);
         let project = Project { id: "p".into(), repo: "r".into(), path: "p".into(), branch: None, apps: vec![dev.clone(), fixed.clone()] };
-        let group = Group { id: "g".into(), label: "g".into(), root: None, root_id: "r".into(), root_path: "r".into(), main: false, scripts: false, projects: vec![project] };
+        let group = Group { id: "g".into(), label: "g".into(), root: None, root_id: "r".into(), root_path: "r".into(), main: false, projects: vec![project] };
         let learned = HashMap::from([(instance_id("p", &dev.id), 5173), (instance_id("p", &fixed.id), 9999)]);
         let json = list_json(std::slice::from_ref(&group), &HashMap::new(), &learned, None, false);
         let apps = &json["worktrees"][0]["projects"][0]["apps"];
@@ -1604,7 +1502,6 @@ mod tests {
                 root_id: "c:/dev".into(),
                 root_path: "C:/dev".into(),
                 main: false,
-                scripts: false,
                 projects: vec![Project { id: dir.clone(), repo: "shop".into(), path: dir, branch: None, apps: vec![web] }],
             },
             Group {
@@ -1614,7 +1511,6 @@ mod tests {
                 root_id: "c:/dev".into(),
                 root_path: "C:/dev".into(),
                 main: false,
-                scripts: false,
                 projects: vec![Project { id: plain_dir.clone(), repo: "shop".into(), path: plain_dir, branch: None, apps: vec![other] }],
             },
         ]);
@@ -1692,7 +1588,6 @@ mod tests {
             root_id: repo.clone(),
             root_path: repo.clone(),
             main: true,
-            scripts: false,
             projects: vec![Project { id: repo.clone(), repo: "umbler-hub".into(), path: repo.clone(), branch: None, apps: vec![app.clone()] }],
         }]);
         let addr = serve(hub.clone(), &[0]).await.unwrap();

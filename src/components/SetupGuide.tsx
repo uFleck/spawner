@@ -47,7 +47,7 @@ const PROMPTS = [
   "Check the spawner logs for errors since you last looked, and tell me which app they came from.",
 ];
 const AGENT_MD = `## Running apps
-Run and check apps through the spawner MCP tools (hub_list_apps, hub_start, hub_logs, hub_stop) instead of running dev servers or builds in a terminal. The user watches every process in Spawner.`;
+Run and check apps through the spawner MCP tools (hub_list_apps, hub_start, hub_logs, hub_stop) instead of running dev servers or builds in a terminal, and only when I ask. The user watches every process in Spawner. Scripts are not used through Spawner.`;
 
 function useClipboard() {
   const [copied, setCopied] = useState<string | null>(null);

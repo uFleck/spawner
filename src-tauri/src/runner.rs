@@ -293,16 +293,6 @@ impl Hub {
         if failures.is_empty() { Ok(()) } else { Err(failures.join("\n")) }
     }
 
-    /// The name of the script behind this instance, or none when it is not a script from a `spawner.json`.
-    pub fn script_name(&self, instance: &str) -> Option<String> {
-        let groups = self.groups.lock().unwrap();
-        groups
-            .iter()
-            .filter(|g| g.scripts)
-            .flat_map(|g| &g.projects)
-            .find_map(|p| p.apps.iter().find(|a| instance_id(&p.id, &a.id) == instance).map(|a| a.name.clone()))
-    }
-
     pub fn last_seq(&self) -> u64 {
         self.seq.load(Ordering::Relaxed) - 1
     }
@@ -434,22 +424,10 @@ impl Hub {
     }
 
     /// Starts an app. `force` kills whatever is listening on the app's port first, for the "use anyway" answer to a busy port.
-    ///
-    /// For a script, `values` fill its declared params (a missing required one is refused here, before
-    /// anything runs), and `extra` arguments are added after them. Only scripts take either.
-    pub fn start_with(self: &Arc<Self>, project_id: &str, app_id: &str, force: bool, values: &HashMap<String, String>, extra: &[String]) -> Result<(), String> {
+    pub fn start_with(self: &Arc<Self>, project_id: &str, app_id: &str, force: bool) -> Result<(), String> {
         let (project, mut app) = self.find_app(project_id, app_id).ok_or("unknown app")?;
         if self.watched.lock().unwrap().contains(&watch::key(&project.repo, &app.id)) {
             watch::watching(&mut app);
-        }
-        if app.kind == detect::scripts::KIND {
-            let mut tail = detect::scripts::build_args(&app.params, values).map_err(|e| format!("{}: {e}", app.name))?;
-            tail.extend(extra.iter().cloned());
-            if let Some(step) = app.steps.last_mut() {
-                step.args.extend(tail);
-            }
-        } else if !values.is_empty() || !extra.is_empty() {
-            return Err(format!("{} takes no extra arguments; only scripts declared in a spawner.json do", app.name));
         }
         let id = instance_id(project_id, app_id);
         // A saved port override is applied to this copy, never to the app in the scan: starting again must not append
@@ -840,7 +818,7 @@ fn preflight(app: &AppDef) -> Result<(), String> {
 /// so a missing port is reported before a missing tool, and any of them before anything runs.
 pub fn launch_plan(project: &Path, app: &AppDef) -> Result<Vec<Step>, String> {
     if app.steps.is_empty() {
-        return Err(app.description.clone().unwrap_or_else(|| format!("{} has no launch steps", app.name)));
+        return Err(format!("{} has no launch steps", app.name));
     }
     let filled = app
         .steps
@@ -944,8 +922,6 @@ mod tests {
                 env: BTreeMap::new(),
                 ready: ready.iter().map(|r| r.to_string()).collect(),
             }],
-            description: None,
-            params: Vec::new(),
         }
     }
 
@@ -1086,8 +1062,8 @@ mod tests {
         let (hub, _seen) = collector();
         let app = cmd_app("job", AppMode::Task, "exit 0", &[]);
         let project = Project { id: "p".into(), repo: "r".into(), path: std::env::temp_dir().to_string_lossy().into_owned(), branch: None, apps: vec![app.clone()] };
-        hub.set_groups(vec![Group { id: "g".into(), label: "g".into(), root: None, root_id: "r".into(), root_path: "r".into(), main: false, scripts: false, projects: vec![project] }]);
-        hub.start_with("p", &app.id, false, &HashMap::new(), &[]).unwrap();
+        hub.set_groups(vec![Group { id: "g".into(), label: "g".into(), root: None, root_id: "r".into(), root_path: "r".into(), main: false, projects: vec![project] }]);
+        hub.start_with("p", &app.id, false).unwrap();
         let id = instance_id("p", &app.id);
         let deadline = Instant::now() + Duration::from_secs(10);
         while !hub.states().get(&id).is_some_and(|s| matches!(s, InstanceState::Exited { .. })) {
@@ -1356,13 +1332,12 @@ mod tests {
             root_id: "r".into(),
             root_path: "r".into(),
             main: false,
-            scripts: false,
             projects: vec![project],
         }]);
         hub.set_port_override("p", &app.id, Some(port)).unwrap();
         assert_eq!(hub.port_overrides().len(), 1);
 
-        hub.start_with("p", &app.id, false, &HashMap::new(), &[]).unwrap();
+        hub.start_with("p", &app.id, false).unwrap();
         let id = instance_id("p", &app.id);
         let deadline = Instant::now() + Duration::from_secs(10);
         while !hub.states().get(&id).is_some_and(|s| matches!(s, InstanceState::Exited { .. })) {

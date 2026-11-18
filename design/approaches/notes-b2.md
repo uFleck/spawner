@@ -198,13 +198,21 @@ Each slice ships into today's sidebar and works on its own.
 
 Shipped in `cockpit-fixes` after using 0.1.12:
 
-- The **Scripts** section is gone from the window. Scripts declared in `spawner.json` still run through the MCP tools; the window no longer lists them.
+- The **Scripts** section is gone from the window. Script support was removed completely right after (see below).
 - **Presets** are gone from the window: no section, no context-menu entries, no palette commands. The stack card absorbed saving a set of apps (**Save as stack**, defaulting to the ones already running). The `ui-state.json` key is kept verbatim so the `hub_*_preset` tools and presets saved by earlier versions still work.
 - The PR pill at the top (`account #1736`) opens that PR on GitHub; the separate **Open PR** button is gone.
 - Run/Stop are icon-only buttons in the rail and the workspace header, with tooltips.
 - **All apps & logs** reads folder → worktree → projects. The folder row shows how many worktrees/projects it holds and how many apps are running.
 - **Copy AI prompt…** opens a preview of the exact text, with the copy button in the dialog.
 - Dragging works from the workspace header (and the rail header) even over the title, the pills' row and the metadata line; controls keep their clicks.
+
+## After 0.1.13
+
+Scripts are gone from Spawner, not just from the window:
+
+- `spawner.json` is no longer read, so a script app cannot appear in a scan.
+- `hub_script_guide`, the `params`/`args` arguments of `hub_start`, and the script notifications are removed.
+- The agent instructions (`~/.claude/CLAUDE.md`, `~/.claude_linck/CLAUDE.md`, `~/.config/opencode/AGENTS.md`) now say Spawner and Hopper are mandatory in Umbler repos but used only when asked, and that scripts are not used through Spawner.
 
 ## How it was checked
 

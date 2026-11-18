@@ -61,14 +61,13 @@ function AppRow({
   onSolo: (id: string) => void;
 }) {
   const id = instanceId(project.id, app.id);
-  const broken = app.kind === "script" && app.steps.length === 0;
   const kind = state?.kind ?? "idle";
   const active = isActive(state);
   const canRun = !active;
   const menu = useContextMenu();
   return (
     <li
-      className={`app-row${marked ? " marked" : ""}${broken ? " broken" : ""}`}
+      className={`app-row${marked ? " marked" : ""}`}
       data-state={kind}
       data-exit={isErrorExit(state) ? "error" : undefined}
       onClick={(e) => (e.ctrlKey || e.metaKey) && actions.toggleMark(id)}
@@ -99,15 +98,7 @@ function AppRow({
           {watched ? <i className="ph ph-eye watching" title="Watching for changes (dotnet watch)" /> : null}
         </div>
         <div className="sub">
-          {where ? (
-            <span className="where">{where}</span>
-          ) : app.description ? (
-            <span className="desc" title={app.description}>
-              {app.description}
-            </span>
-          ) : (
-            <span className="kind">{watched ? "dotnet-watch" : app.kind}</span>
-          )}
+          {where ? <span className="where">{where}</span> : <span className="kind">{watched ? "dotnet-watch" : app.kind}</span>}
           {port ? (
             <>
               <span> · </span>
@@ -517,7 +508,6 @@ function PinnedApps({
   const rows = snap.pins.apps.flatMap((id) => {
     if (keep && !keep(id)) return [];
     for (const g of snap.groups) {
-      if (g.scripts) continue;
       for (const p of g.projects)
         for (const a of p.apps)
           if (instanceId(p.id, a.id) === id) {
@@ -644,13 +634,12 @@ export function Sidebar({ snap, theme, onSolo, onTheme, onGuide, onLogoClick }: 
     const rank = (g: Group) => ((snap.concluding[g.id]?.pinned ?? snap.pins.groups.includes(g.id)) ? 0 : 1);
     return [...found].sort((a, b) => rank(a) - rank(b));
   }, [listed, snap.pins.groups, snap.concluding, snap.lastRun, text, keep, recent]);
-  const worktrees = useMemo(() => groups.filter((g) => !g.scripts), [groups]);
   // The tree reads folder first: the worktrees a scan folder holds, and inside each its projects.
   const folders = useMemo(() => {
     const known = new Set(snap.roots.map((r) => r.path));
     const byRoot = new Map<string, Group[]>();
     const extra: Group[] = [];
-    for (const g of worktrees) {
+    for (const g of groups) {
       if (!known.has(g.rootPath)) {
         extra.push(g);
         continue;
@@ -664,10 +653,10 @@ export function Sidebar({ snap, theme, onSolo, onTheme, onGuide, onLogoClick }: 
       .filter((f) => f.groups.length > 0);
     if (extra.length) out.push({ key: "other", root: { path: "", label: "Other folders" }, groups: extra });
     return out;
-  }, [worktrees, snap.roots]);
+  }, [groups, snap.roots]);
   const liveApps = useMemo(
-    () => worktrees.reduce((n, g) => n + g.projects.reduce((m, p) => m + p.apps.filter((a) => isActive(snap.states[instanceId(p.id, a.id)])).length, 0), 0),
-    [worktrees, snap.states],
+    () => groups.reduce((n, g) => n + g.projects.reduce((m, p) => m + p.apps.filter((a) => isActive(snap.states[instanceId(p.id, a.id)])).length, 0), 0),
+    [groups, snap.states],
   );
   // The existing tree is a fallback now, so it starts folded; the review rail and the workspace are the front door.
   const [allOpen, setAllOpen] = useState(false);
@@ -711,7 +700,7 @@ export function Sidebar({ snap, theme, onSolo, onTheme, onGuide, onLogoClick }: 
         <div className="tree-in">
           <ReviewRail snap={snap} query={text} />
           <PinnedApps snap={snap} query={text} onSolo={onSolo} keep={keep} recent={recent} />
-          <AllApps open={allOpen} onToggle={() => setAllOpen(!allOpen)} count={worktrees.length} live={liveApps} current={snap.selectedWorktree === null}>
+          <AllApps open={allOpen} onToggle={() => setAllOpen(!allOpen)} count={groups.length} live={liveApps} current={snap.selectedWorktree === null}>
             {folders.map((f) => (
               <FolderBlock key={f.key} root={f.root} groups={f.groups} snap={snap} onSolo={onSolo} expand={keep !== null} />
             ))}

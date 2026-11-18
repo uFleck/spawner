@@ -17,23 +17,6 @@ export interface StepSpec {
   env?: Record<string, string>;
 }
 
-/** An argument a script declares in its spawner.json, asked for in a form before the script runs. */
-export interface Param {
-  name: string;
-  /** "flag" is an on/off switch that adds its `flag`; "text" is a value, positional unless it has a `flag`. */
-  kind: "text" | "flag";
-  /** What to enter, shown under the field. */
-  hint: string | null;
-  /** An example value, shown inside the empty field. */
-  placeholder: string | null;
-  flag: string | null;
-  /** The allowed values, when there is a fixed set. */
-  options: string[];
-  required: boolean;
-  /** Used when the field is left empty. A flag's is "true" when it starts on. */
-  default: string | null;
-}
-
 export interface AppDef {
   /** Unique within its project and stable across rescans. */
   id: string;
@@ -49,10 +32,6 @@ export interface AppDef {
   /** The port is read from the running service's output (a dev server picks its own); see `Snapshot.ports`. */
   learnPort: boolean;
   steps: StepSpec[];
-  /** What a script is for, or what is wrong with its spawner.json. Null for everything else. */
-  description: string | null;
-  /** What a script asks for before it runs. Empty for everything else. */
-  params: Param[];
 }
 
 export interface Project {
@@ -183,8 +162,6 @@ export interface Group {
   rootId: string;
   rootPath: string;
   main: boolean;
-  /** The user's own scripts (declared in a spawner.json), listed apart from the worktrees. */
-  scripts: boolean;
   projects: Project[];
 }
 
@@ -235,8 +212,6 @@ export type LinkStatus =
   | { state: "missing" };
 
 export interface Settings {
-  /** Tell the user when a script starts and ends while Spawner is not the focused window. */
-  notifyScripts: boolean;
   /** Show the companion window at the edge of the screen while apps run. */
   companion: boolean;
 }
@@ -303,9 +278,8 @@ export const api = {
   concludeWorktree: (groupId: string, force = false) => invoke<Concluded>("conclude_worktree", { groupId, force }),
   /** Checks deleted worktrees out again, on their branches. Uncommitted changes and ignored files do not come back. */
   restoreWorktrees: (removed: RemovedWorktree[]) => invoke<void>("restore_worktrees", { removed }),
-  /** `force` kills whatever listens on the app's port first. `params` are a script's values by param name; the backend refuses a missing required one. */
-  start: (projectId: string, appId: string, force = false, params?: Record<string, string>) =>
-    invoke<void>("start", { projectId, appId, force, params: params ?? null }),
+  /** `force` kills whatever listens on the app's port first. */
+  start: (projectId: string, appId: string, force = false) => invoke<void>("start", { projectId, appId, force }),
   stop: (instanceId: string) => invoke<void>("stop", { instanceId }),
   instanceStates: () => invoke<Record<string, InstanceState>>("instance_states"),
   instancePorts: () => invoke<Record<string, number>>("instance_ports"),

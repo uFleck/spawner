@@ -48,36 +48,6 @@ pub struct StepSpec {
     pub ready: Vec<String>,
 }
 
-/// What a script parameter holds: free text, or an on/off switch that adds its flag.
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
-#[serde(rename_all = "kebab-case")]
-pub enum ParamKind {
-    #[default]
-    Text,
-    Flag,
-}
-
-/// An argument a script takes, declared in its `spawner.json` so the UI can ask for it (with its `hint`) before the
-/// script runs, instead of the user finding out from its failure. See `detect::scripts::build_args` for how values
-/// become command-line arguments.
-#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct Param {
-    pub name: String,
-    pub kind: ParamKind,
-    /// What to enter, shown under the field.
-    pub hint: Option<String>,
-    /// An example value, shown inside the empty field.
-    pub placeholder: Option<String>,
-    /// The option that introduces the value (`--out`). Without one a text value is a positional argument.
-    pub flag: Option<String>,
-    /// The allowed values, offered as a choice.
-    pub options: Vec<String>,
-    pub required: bool,
-    /// Used when no value is given; for a flag, `"true"` means on.
-    pub default: Option<String>,
-}
-
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AppDef {
@@ -96,10 +66,6 @@ pub struct AppDef {
     /// service prints, and show that. Only meaningful for a service without a fixed `port`.
     pub learn_port: bool,
     pub steps: Vec<StepSpec>,
-    /// What a script is for, or what is wrong with its `spawner.json`. Shown next to the app and in `hub_list_apps`.
-    pub description: Option<String>,
-    /// The arguments a script asks for before it runs. Empty for everything else.
-    pub params: Vec<Param>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -132,8 +98,6 @@ pub struct Group {
     pub root_id: String,
     pub root_path: String,
     pub main: bool,
-    /// The user's own scripts (declared in a `spawner.json`), which are not part of any worktree.
-    pub scripts: bool,
     pub projects: Vec<Project>,
 }
 

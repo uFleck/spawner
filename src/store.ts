@@ -92,8 +92,6 @@ export interface Snapshot {
   error: string | null;
   /** The app whose start failed on a busy port, so the alert can offer to start it anyway. */
   portConflict: { projectId: string; appId: string } | null;
-  /** The script whose params are being asked for before it runs. */
-  runAsk: { projectId: string; appId: string } | null;
   /** The conclude dialog that is open. A "problem" one reads what happened from `problems`. */
   dialog: { kind: "confirm" | "problem"; group: Group } | null;
   concluding: Record<string, Concluding>;
@@ -146,13 +144,12 @@ let snapshot: Snapshot = {
   entered: {},
   logs: [],
   mcp: null,
-  settings: { notifyScripts: false, companion: true },
+  settings: { companion: true },
   startOnLogin: false,
   loading: true,
   scanned: false,
   error: null,
   portConflict: null,
-  runAsk: null,
   dialog: null,
   concluding: {},
   problems: {},
@@ -296,10 +293,6 @@ function togglePin(kind: keyof Pins, id: string) {
 
 const isLive = (id: string) => isActive(snapshot.states[id]);
 const activeIds = () => Object.keys(snapshot.states).filter(isLive);
-
-function findApp(projectId: string, appId: string): AppDef | undefined {
-  return snapshot.groups.flatMap((g) => g.projects).find((p) => p.id === projectId)?.apps.find((a) => a.id === appId);
-}
 
 /** Starts the apps together and reports every failure, not just the last. */
 async function startInstances(pairs: { projectId: string; appId: string }[]) {
@@ -686,11 +679,9 @@ export const actions = {
     }
   },
   clearStackConflict: (instance: string) => set({ stackConflicts: without(snapshot.stackConflicts, instance) }),
-  /** Runs an app. A script that declares params is asked for them first, unless `params` are given. */
-  start(projectId: string, appId: string, force = false, params?: Record<string, string>) {
-    if (!params && findApp(projectId, appId)?.params.length) return Promise.resolve(set({ runAsk: { projectId, appId }, error: null }));
-    set({ runAsk: null });
-    return api.start(projectId, appId, force, params).then(
+  /** Runs an app. */
+  start(projectId: string, appId: string, force = false) {
+    return api.start(projectId, appId, force).then(
       () => set({ error: null, portConflict: null }),
       (e) => {
         const busy = /port \d+ is already in use/.test(String(e));
@@ -698,7 +689,6 @@ export const actions = {
       },
     );
   },
-  cancelRunAsk: () => set({ runAsk: null }),
   stop: (id: string) => api.stop(id).then(() => set({ error: null }), fail),
   togglePinGroup: (id: string) => togglePin("groups", id),
   togglePinApp: (id: string) => togglePin("apps", id),
@@ -755,7 +745,6 @@ export const actions = {
   removeRoot: (path: string) => changeRoots(() => api.removeRoot(path)),
   openPort: (port: number) => api.openPort(port).catch(fail),
   openUrl: (url: string) => api.openUrl(url),
-  setNotifyScripts: (notifyScripts: boolean) => saveSettings({ notifyScripts }),
   setCompanion: (companion: boolean) => saveSettings({ companion }),
   setStartOnLogin: async (startOnLogin: boolean) => {
     const previous = snapshot.startOnLogin;

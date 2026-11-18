@@ -106,8 +106,6 @@ pub fn app_def(flavor: Flavor, rel: &str, name: &str, port: Option<u16>) -> AppD
         check_port: flavor == Flavor::IisExpress,
         learn_port: false,
         steps,
-        description: None,
-        params: Vec::new(),
     }
 }
 
