@@ -25,8 +25,8 @@ function StackButton({ group, snap, live }: { group: Group; snap: Snapshot; live
   // Once the stack is known to be missing, the row says so instead of offering a start that cannot work.
   if (stack && !stack.source)
     return (
-      <span className="wt-nostack" title="No spawner.stack.json yet: open the worktree to set one up">
-        no stack
+      <span className="wt-nostack" role="img" aria-label="No stack yet" title="No spawner.stack.json yet: open the worktree to set one up">
+        <i className="ph ph-stack" aria-hidden="true" />
       </span>
     );
   if (live)
@@ -35,13 +35,14 @@ function StackButton({ group, snap, live }: { group: Group; snap: Snapshot; live
         type="button"
         className="runbtn stop"
         aria-label={`Stop stack ${group.label}`}
+        data-tip="Stop stack"
+        data-side="bottom"
         onClick={(e) => {
           e.stopPropagation();
           void actions.stopStack(group.id);
         }}
       >
         <i className="ph-fill ph-stop" />
-        <span className="lbl">Stop</span>
       </button>
     );
   return (
@@ -49,6 +50,8 @@ function StackButton({ group, snap, live }: { group: Group; snap: Snapshot; live
       type="button"
       className="runbtn"
       aria-label={`Run stack ${group.label}`}
+      data-tip="Run stack"
+      data-side="bottom"
       disabled={snap.stackBusy}
       onClick={(e) => {
         e.stopPropagation();
@@ -58,7 +61,6 @@ function StackButton({ group, snap, live }: { group: Group; snap: Snapshot; live
       }}
     >
       <i className={snap.stackBusy ? "ph ph-circle-notch spin" : "ph-fill ph-play"} />
-      <span className="lbl">Run stack</span>
     </button>
   );
 }
@@ -92,7 +94,8 @@ function Row({
   // A shared main app running for another worktree must not turn this row's button into Stop.
   const live = own.some((id) => isActive(snap.states[id]));
   const stack = snap.stacks[group.id];
-  const apps = stack ? stack.apps.length : serviceCount(group);
+  // A no-stack worktree still says how many apps it has, from what the scan found.
+  const apps = stack?.source ? stack.apps.length : serviceCount(group);
   const repos = [...new Set(group.projects.map((p) => p.repo))].join(" · ");
   return (
     <div
@@ -114,6 +117,7 @@ function Row({
       <span className="wt-t">
         {group.label}
         {pr ? <span className="wt-num">#{pr.number}</span> : null}
+        {prs.length > 1 ? <span className="wt-num" title={`${prs.length} open PRs`}>+{prs.length - 1}</span> : null}
       </span>
       <span className="wt-r">
         <StackButton group={group} snap={snap} live={live} />
@@ -133,10 +137,9 @@ function Row({
                 {facts.checks.short}
               </span>
             ) : null}
-            {prs.length > 1 ? <span className="wt-dim">+{prs.length - 1} PR</span> : null}
+            {/* Repos are on the workspace header, and repeating them here is what squeezed the app count at 307 px. */}
             <span className="wt-dim wt-repos" title={apps ? `${repos} · ${apps} app${apps === 1 ? "" : "s"}` : repos}>
-              {repos}
-              {apps ? ` · ${apps} app${apps === 1 ? "" : "s"}` : ""}
+              {apps ? `${apps} app${apps === 1 ? "" : "s"}` : repos}
             </span>
           </span>
         </>

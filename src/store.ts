@@ -23,16 +23,6 @@ import {
   type Settings,
   type StateEvent,
 } from "./api";
-import {
-  MAIN,
-  parsePresets,
-  memberOf,
-  resolvePreset,
-  sameMember,
-  type Preset,
-  type PresetHit,
-  type PresetMember,
-} from "./presets";
 
 const LOG_CAP = 20_000;
 
@@ -112,13 +102,10 @@ export interface Snapshot {
   undos: Undo[];
   /** Group ids just restored, highlighted for a moment. */
   revived: string[];
-  presets: Preset[];
   /** Worktree group ids float to the top of the tree; instance ids get a Pinned section, each tagged with its worktree. */
   pins: Pins;
   /** When each instance last started, in epoch ms. Keyed by instance id; kept across restarts so the sidebar can sort by it. */
   lastRun: Record<string, number>;
-  /** The apps a new preset starts with while its name is being typed, or null when no preset is being created. */
-  presetDraft: { members: PresetMember[]; name: string } | null;
   /** Instance ids ticked with Ctrl+click, so a few of the running apps can be restarted or stopped together. */
   marked: string[];
   /** `watchKey`s of the apps that run under `dotnet watch`. */
@@ -171,10 +158,8 @@ let snapshot: Snapshot = {
   problems: {},
   undos: [],
   revived: [],
-  presets: [],
   pins: { groups: [], apps: [] },
   lastRun: {},
-  presetDraft: null,
   marked: [],
   watched: [],
   stack: null,
@@ -255,13 +240,18 @@ const timestamps = (v: unknown): Record<string, number> =>
     ? Object.fromEntries(Object.entries(v).filter((e): e is [string, number] => Number.isFinite(e[1])))
     : {};
 
-/** Presets, pins and last-run times live in a file in the app data directory. Nothing is written before they have been read, or the empty defaults would replace them. */
+/**
+ * Pins and last-run times live in a file in the app data directory. The same file carries `presets`, which the window
+ * no longer shows: stacks replaced them. It is kept verbatim so a saved preset and the `hub_*_preset` MCP tools keep
+ * working. Nothing is written before the file has been read, or the empty defaults would replace it.
+ */
 let uiStateLoaded = false;
+let savedPresets: unknown = [];
 
 function persistUiState() {
   if (!uiStateLoaded) return;
-  const { presets, pins, lastRun } = snapshot;
-  api.saveUiState(JSON.stringify({ presets, pins, lastRun })).catch(fail);
+  const { pins, lastRun } = snapshot;
+  api.saveUiState(JSON.stringify({ presets: savedPresets, pins, lastRun })).catch(fail);
 }
 
 /** An older build kept them in the webview's localStorage; the first run on the file adopts them. */
@@ -288,8 +278,8 @@ async function loadUiState() {
     return;
   }
   const state = raw as { presets?: unknown; pins?: { groups?: unknown; apps?: unknown }; lastRun?: unknown } | null;
+  savedPresets = state?.presets ?? [];
   set({
-    presets: parsePresets(state?.presets),
     pins: { groups: strings(state?.pins?.groups), apps: strings(state?.pins?.apps) },
     lastRun: timestamps(state?.lastRun),
   });
@@ -306,31 +296,6 @@ function togglePin(kind: keyof Pins, id: string) {
 
 const isLive = (id: string) => isActive(snapshot.states[id]);
 const activeIds = () => Object.keys(snapshot.states).filter(isLive);
-const pairOf = (h: PresetHit) => ({ projectId: h.project.id, appId: h.app.id });
-
-function runningMembers(): PresetMember[] {
-  const running = new Set(activeIds());
-  return snapshot.groups.flatMap((g) =>
-    g.projects.flatMap((p) => p.apps.filter((a) => running.has(instanceId(p.id, a.id))).map((a) => memberOf(p, a))),
-  );
-}
-
-/** The first worktree (a task such as PAYMENT-9987, not main) that holds one of these instances, as a name to offer. */
-function suggestName(instances: string[]): string {
-  const wanted = new Set(instances);
-  const task = snapshot.groups.find(
-    (g) => !g.main && g.projects.some((p) => p.apps.some((a) => wanted.has(instanceId(p.id, a.id)))),
-  );
-  return task?.label ?? "";
-}
-
-function setPresets(presets: Preset[], patch: Partial<Snapshot> = {}) {
-  set({ ...patch, presets });
-  persistUiState();
-}
-
-const editPreset = (id: string, change: (p: Preset) => Preset) =>
-  setPresets(snapshot.presets.map((p) => (p.id === id ? change(p) : p)));
 
 function findApp(projectId: string, appId: string): AppDef | undefined {
   return snapshot.groups.flatMap((g) => g.projects).find((p) => p.id === projectId)?.apps.find((a) => a.id === appId);
@@ -772,35 +737,6 @@ export const actions = {
     const ids = snapshot.marked;
     set({ marked: [] });
     await stopInstances(ids.filter(isLive));
-  },
-  runPreset(preset: Preset) {
-    const { hits } = resolvePreset(preset, snapshot.groups);
-    return startInstances(hits.filter((h) => !isActive(snapshot.states[h.instance])).map(pairOf));
-  },
-  stopPreset: (preset: Preset) =>
-    stopInstances(resolvePreset(preset, snapshot.groups).hits.map((h) => h.instance).filter(isLive)),
-  restartPreset: (preset: Preset) => restartInstances(resolvePreset(preset, snapshot.groups).hits.map(pairOf)),
-  /** Opens the new-preset name field, seeded with `seed`. */
-  draftFromRunning: () => set({ presetDraft: { members: runningMembers(), name: suggestName(activeIds()) } }),
-  draftFromApp: (member: PresetMember, instance: string) =>
-    set({ presetDraft: { members: [member], name: suggestName([instance]) } }),
-  cancelDraft: () => set({ presetDraft: null }),
-  createPreset(name: string, members: PresetMember[]) {
-    const preset: Preset = { id: crypto.randomUUID(), name, members, target: MAIN };
-    setPresets([...snapshot.presets, preset], { presetDraft: null });
-  },
-  renamePreset: (id: string, name: string) => editPreset(id, (p) => ({ ...p, name })),
-  deletePreset: (id: string) => setPresets(snapshot.presets.filter((p) => p.id !== id)),
-  setPresetTarget: (id: string, target: string) => editPreset(id, (p) => ({ ...p, target })),
-  addToPreset: (id: string, member: PresetMember) =>
-    editPreset(id, (p) => (p.members.some((m) => sameMember(m, member)) ? p : { ...p, members: [...p.members, member] })),
-  removeFromPreset: (id: string, member: PresetMember) =>
-    editPreset(id, (p) => ({ ...p, members: p.members.filter((m) => !sameMember(m, member)) })),
-  /** Replaces a preset's apps with the ones running now. */
-  setPresetToRunning(id: string) {
-    const members = runningMembers();
-    if (members.length === 0) return fail("No apps are running to save.");
-    editPreset(id, (p) => ({ ...p, members }));
   },
   async clearLogs(id?: string) {
     await api.clearLogs(id);

@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { isActive, type Group } from "../api";
+import { toggleWindowMaximize, startWindowDrag } from "../drag";
 import { ago, prsFor, reviewOf, scopeIds } from "../review";
 import { actions, type Snapshot } from "../store";
 import { IconButton } from "./IconButton";
@@ -13,11 +14,11 @@ interface Props {
   log: Omit<LogPaneProps, "scope" | "scopeLabel">;
 }
 
-/** Opens the PRs in the user's browser; WebView2 refuses window.open, so the backend hands each URL to the OS. */
-function openPrs(urls: string[], onToast: (text: string) => void) {
-  void Promise.all(urls.map((url) => actions.openUrl(url))).then(
-    () => onToast(urls.length === 1 ? `Opened ${urls[0].replace(/^https?:\/\//, "")}` : `Opened ${urls.length} PRs`),
-    () => void navigator.clipboard.writeText(urls.join("\n")).then(() => onToast("PR link copied"), () => undefined),
+/** Opens a PR in the user's browser; WebView2 refuses window.open, so the backend hands the URL to the OS. */
+function openPr(url: string, onToast: (text: string) => void) {
+  void actions.openUrl(url).then(
+    () => onToast(`Opened ${url.replace(/^https?:\/\//, "")}`),
+    () => void navigator.clipboard.writeText(url).then(() => onToast("PR link copied"), () => undefined),
   );
 }
 
@@ -46,18 +47,27 @@ export function WorktreeView({ snap, group, log }: Props) {
 
   return (
     <div className="ws">
-      <header className="ws-h" data-tauri-drag-region>
+      <header className="ws-h" onMouseDown={startWindowDrag} onDoubleClick={toggleWindowMaximize}>
         <div className="ws-top">
           <IconButton icon="ph ph-sidebar-simple" label="Toggle sidebar" kbd="Ctrl B" onClick={log.onToggleSide} />
           <h2 title={group.label}>{group.label}</h2>
-          {/* The pill names the PR and colours its state; the strip below says the rest, so nothing is said twice. */}
+          {/* The number is the way to the PR: one click opens it, and the state colours the pill. The strip below
+              carries the title, so neither repeats the other. */}
           {prs.map((p) => {
             const facts = reviewOf(p);
             return (
-              <span key={`${p.repo}#${p.number}`} className={`pill ${facts.cls}`} title={`${p.slug}#${p.number} · ${facts.text} · ${p.title}`}>
+              <button
+                key={`${p.repo}#${p.number}`}
+                type="button"
+                className={`pill ${facts.cls}`}
+                title={`Open ${p.slug}#${p.number} on GitHub · ${facts.text} · ${p.title}`}
+                aria-label={`Open ${p.slug}#${p.number} on GitHub`}
+                onClick={() => openPr(p.url, log.onToast)}
+              >
                 <i className={`ph-bold ph-git-pull-request ${facts.icon}`} />
                 {prs.length > 1 ? `${p.repo} ` : ""}#{p.number}
-              </span>
+                <i className="ph ph-arrow-up-right ext" aria-hidden="true" />
+              </button>
             );
           })}
           <span className="grow" />
@@ -80,36 +90,31 @@ export function WorktreeView({ snap, group, log }: Props) {
             ) : null}
           </span>
           <span className="acts">
-            {prs.length > 0 ? (
-              <button
-                type="button"
-                className="btn btn-ghost sm"
-                title={prs.map((p) => p.url).join("\n")}
-                onClick={() => openPrs(prs.map((p) => p.url), log.onToast)}
-              >
-                <i className="ph ph-github-logo" />
-                <span className="lbl">{prs.length > 1 ? `Open ${prs.length} PRs` : "Open PR"}</span>
-              </button>
-            ) : null}
             {hasStack ? (
               <>
+                {live > 0 ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost sm icon"
+                    aria-label="Stop stack"
+                    data-tip="Stop stack"
+                    data-side="bottom"
+                    disabled={snap.stackBusy}
+                    onClick={() => void actions.stopStack(group.id)}
+                  >
+                    <i className="ph-fill ph-stop" />
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  className="btn btn-ghost sm"
-                  disabled={snap.stackBusy || live === 0}
-                  onClick={() => void actions.stopStack(group.id)}
-                >
-                  <i className="ph-fill ph-stop" />
-                  <span className="lbl">Stop stack</span>
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary sm"
+                  className="btn btn-primary sm icon"
+                  aria-label={allLive ? "Stack running" : live ? "Run the rest of the stack" : "Run stack"}
+                  data-tip={allLive ? "Stack running" : live ? `Run the remaining ${services.length - live} app${services.length - live === 1 ? "" : "s"}` : "Run stack"}
+                  data-side="bottom"
                   disabled={snap.stackBusy || allLive}
                   onClick={() => void actions.startStack(group.id)}
                 >
                   <i className={snap.stackBusy ? "ph ph-circle-notch spin" : "ph-fill ph-play"} />
-                  {allLive ? "Stack running" : live ? "Run the rest" : "Run stack"}
                 </button>
               </>
             ) : null}

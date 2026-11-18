@@ -121,7 +121,9 @@ A worktree with an open PR is listed first in the sidebar (**In review**, read f
 - `env` links apps: `{port:<app name>}` is the other app's resolved port, `{port}` the app's own, `{cwd}` its folder, so a moved port follows. An unknown name is an error at start.
 - Only `iis-express`, `dotnet-run`, `vite`, `next`, `react` and `node` services take a port. Tauri apps, scripts and tasks cannot; leave `port` out for them.
 
-A repo without a manifest shows the apps Spawner detected; **Use detected apps** writes the ones you keep to `spawner.stack.json`, and **Copy AI prompt** hands an agent the schema to write it.
+A repo without a manifest shows the apps Spawner detected, with the ones already running ticked; **Save as stack** writes the ones you keep to `spawner.stack.json`, and **Copy AI prompt…** previews the schema handed to an agent, with a copy button. Stacks replace the old presets: the window no longer shows a Presets section, and the preset tools below still read what earlier versions saved.
+
+The **All apps & logs** tree reads folder first: each scan folder, the worktrees it holds, then each worktree's projects and apps.
 
 ## UI in a browser
 
@@ -147,9 +149,9 @@ The status bar shows the port, and clicking it opens the setup guide. The guide 
 | `hub_logs` | Reads logs with `since_seq` polling, `min_level`, `query`/`regex` and a `tail` limit. |
 | `hub_clear_logs` | Clears one app's logs, or all. |
 | `hub_rescan` | Rescans the configured folders for new worktrees and apps. |
-| `hub_list_presets` | The presets saved in the window, with the worktrees each can run in and how its apps resolve in its default worktree. |
-| `hub_start_preset` | Starts every app of a preset concurrently, in its own worktree or the `worktree` given. Apps whose repo the worktree lacks run from main, as in the window. |
-| `hub_stop_preset` | Stops the active apps of a preset. |
+| `hub_list_presets` | Presets saved by an earlier Spawner, with the worktrees each can run in and how its apps resolve there. The window itself no longer shows presets; stacks replaced them. |
+| `hub_start_preset` | Starts every app of a saved preset concurrently, in its own worktree or the `worktree` given. Apps whose repo the worktree lacks run from main. |
+| `hub_stop_preset` | Stops the active apps of a saved preset. |
 | `hub_get_stack` | A worktree's stack resolved for its checkout: each app's repo, checkout (`worktree`, or `main` when shared), port and `port_source`, default port, URL and linked env. Without a manifest, `detected` lists the service apps that could make one. |
 | `hub_set_port` | Saves one stack app's port as an override for that checkout (`port: null` clears it). Refused for kinds that cannot take a port. |
 | `hub_start_stack` | Starts every service app of the stack concurrently with the saved ports and linked env, reusing running ones; one app's failure does not stop the others. |

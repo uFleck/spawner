@@ -192,8 +192,19 @@ Each slice ships into today's sidebar and works on its own.
 ## Open questions
 
 - Should the merged "All logs" view stay as a footer row, or is the scoped view enough?
-- Should presets become stacks ("Save as stack" writes the manifest), or stay a separate feature under Scripts?
 - Should Run stack on a review row also open the `open` app once it's up, or keep that as one more click (the mockup offers it as a button)?
+
+## Follow-up after 0.1.12
+
+Shipped in `cockpit-fixes` after using 0.1.12:
+
+- The **Scripts** section is gone from the window. Scripts declared in `spawner.json` still run through the MCP tools; the window no longer lists them.
+- **Presets** are gone from the window: no section, no context-menu entries, no palette commands. The stack card absorbed saving a set of apps (**Save as stack**, defaulting to the ones already running). The `ui-state.json` key is kept verbatim so the `hub_*_preset` tools and presets saved by earlier versions still work.
+- The PR pill at the top (`account #1736`) opens that PR on GitHub; the separate **Open PR** button is gone.
+- Run/Stop are icon-only buttons in the rail and the workspace header, with tooltips.
+- **All apps & logs** reads folder → worktree → projects. The folder row shows how many worktrees/projects it holds and how many apps are running.
+- **Copy AI prompt…** opens a preview of the exact text, with the copy button in the dialog.
+- Dragging works from the workspace header (and the rail header) even over the title, the pills' row and the metadata line; controls keep their clicks.
 
 ## How it was checked
 

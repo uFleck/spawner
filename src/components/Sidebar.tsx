@@ -2,12 +2,10 @@ import { useMemo, useState, type ReactNode } from "react";
 import { canWatch, instanceId, isActive, isErrorExit, rootName, watchKey, type AppDef, type Group, type InstanceState, type Project, type Root } from "../api";
 import { actions, type InstanceInfo, type Snapshot } from "../store";
 import logo from "../assets/spawner.svg";
-import { memberOf, sameMember, type Preset } from "../presets";
-import { useContextMenu, type MenuItem } from "./ContextMenu";
+import { toggleWindowMaximize, startWindowDrag } from "../drag";
+import { useContextMenu } from "./ContextMenu";
 import { IconButton } from "./IconButton";
-import { Presets } from "./Presets";
 import { ReviewRail } from "./ReviewRail";
-import { ScriptsGuide } from "./ScriptsGuide";
 import { UndoToasts } from "./UndoToasts";
 
 interface Props {
@@ -18,7 +16,6 @@ interface Props {
   onTheme: () => void;
   onGuide: () => void;
   onLogoClick: () => void;
-  onToast: (text: string) => void;
 }
 
 function summarize(projects: Project[], states: Snapshot["states"]) {
@@ -45,14 +42,12 @@ function AppRow({
   port,
   marked,
   watched,
-  presets,
   pinned,
   where,
   onSolo,
 }: {
   project: Project;
   app: AppDef;
-  presets: Preset[];
   pinned: boolean;
   /** Ticked with Ctrl+click, to be restarted or stopped together with the other ticked apps. */
   marked: boolean;
@@ -71,16 +66,6 @@ function AppRow({
   const active = isActive(state);
   const canRun = !active;
   const menu = useContextMenu();
-  const member = memberOf(project, app);
-  const presetItems: MenuItem[] = [
-    ...presets.map((p): MenuItem => {
-      const has = p.members.some((m) => sameMember(m, member));
-      return has
-        ? { label: `Remove from “${p.name}”`, icon: "ph ph-bookmark-simple", run: () => actions.removeFromPreset(p.id, member) }
-        : { label: `Add to “${p.name}”`, icon: "ph ph-bookmark-simple", run: () => actions.addToPreset(p.id, member) };
-    }),
-    { label: "New preset with this app…", icon: "ph ph-bookmark-simple", run: () => actions.draftFromApp(member, id) },
-  ];
   return (
     <li
       className={`app-row${marked ? " marked" : ""}${broken ? " broken" : ""}`}
@@ -99,8 +84,6 @@ function AppRow({
           { label: marked ? "Unmark" : "Mark for batch restart", icon: marked ? "ph ph-minus-circle" : "ph ph-check-circle", run: () => actions.toggleMark(id) },
           ...(port ? [{ label: `Open :${port} in browser`, icon: "ph ph-globe", run: () => void actions.openPort(port) }] : []),
           { label: pinned ? "Unpin" : "Pin", icon: pinned ? "ph ph-push-pin-slash" : "ph ph-push-pin", run: () => actions.togglePinApp(id) },
-          "sep",
-          ...presetItems,
           "sep",
           { label: "Show only this log", icon: "ph ph-rows", run: () => onSolo(id) },
           { label: "Clear this log", icon: "ph ph-trash", run: () => void actions.clearLogs(id) },
@@ -213,7 +196,6 @@ function GroupBlock({
   // Only linked worktrees can be deleted; the backend refuses anything else.
   const concludable = !group.main && !isFolder;
   const branch = isFolder ? undefined : group.projects.find((p) => p.branch)?.branch;
-  const where = snap.roots.length > 1 && !isFolder ? ` · ${folder}` : "";
   return (
     <div className={`wtg-wrap${phase === "out" ? " out" : ""}`}>
     <div className={`wtg${closed ? " closed" : ""}${phase ? ` is-${phase}` : ""}${back ? " back" : ""}${problem ? " has-problem" : ""}`}>
@@ -243,7 +225,6 @@ function GroupBlock({
           <span>
             {group.projects.length} project{group.projects.length === 1 ? "" : "s"}
             {!group.main && branch && branch !== group.label ? ` · ${branch}` : ""}
-            {where}
           </span>
         </div>
         {phase ? (
@@ -354,7 +335,6 @@ function ProjectBlock({
                   port={a.port ?? snap.ports[id]}
                   marked={snap.marked.includes(id)}
                   watched={snap.watched.includes(watchKey(p, a))}
-                  presets={snap.presets}
                   pinned={snap.pins.apps.includes(id)}
                   onSolo={onSolo}
                 />
@@ -367,90 +347,63 @@ function ProjectBlock({
   );
 }
 
-/** The user's own scripts. They live outside every worktree, so they get a section of their own after the tree. */
-function Scripts({
+/** One scan folder: the worktrees it holds, each with its projects and apps. */
+function FolderBlock({
+  root,
   groups,
   snap,
   onSolo,
-  onToast,
-  filtering,
+  expand,
 }: {
+  root: Root;
   groups: Group[];
   snap: Snapshot;
   onSolo: (id: string) => void;
-  onToast: (text: string) => void;
-  filtering: boolean;
+  /** Shows the worktrees even when the folder is collapsed, while a filter is active. */
+  expand: boolean;
 }) {
-  const [closed, setClosed] = useState(false);
-  const [guide, setGuide] = useState(false);
+  const [collapsed, setClosed] = useState(false);
+  const open = !collapsed || expand;
   const menu = useContextMenu();
-  const projects = groups.flatMap((g) => g.projects);
-  const count = projects.reduce((n, p) => n + p.apps.length, 0);
-  const sum = summarize(projects, snap.states);
-  const notify = snap.settings.notifyScripts;
-  if (filtering && count === 0) return null;
+  const projects = groups.reduce((n, g) => n + g.projects.length, 0);
+  const live = groups.reduce(
+    (n, g) => n + g.projects.reduce((m, p) => m + p.apps.filter((a) => isActive(snap.states[instanceId(p.id, a.id)])).length, 0),
+    0,
+  );
   return (
-    <section className={`scripts${closed ? " closed" : ""}`}>
-      <div className="scripts-h" onClick={() => setClosed(!closed)}>
+    <div className={`fold-block${open ? "" : " closed"}`}>
+      <div
+        className="fold-h"
+        onClick={() => setClosed(!collapsed)}
+        onContextMenu={(e) =>
+          menu.show(e, [
+            { label: collapsed ? "Expand" : "Collapse", icon: collapsed ? "ph ph-caret-down" : "ph ph-caret-up", run: () => setClosed(!collapsed) },
+            { label: "Copy path", icon: "ph ph-copy", run: () => menu.copy(root.path, "Path") },
+            "sep",
+            { label: "Remove folder", icon: "ph ph-x", danger: true, run: () => void actions.removeRoot(root.path) },
+          ])
+        }
+      >
         <span className="caret">
           <i className="ph-bold ph-caret-down" />
         </span>
-        <span className="t">Scripts</span>
-        {sum ? <span className={`sum ${sum.cls}`}>{sum.text}</span> : <span className="n">{count}</span>}
-        <IconButton
-          small
-          className={notify ? "scripts-bell on" : "scripts-bell"}
-          icon={notify ? "ph-fill ph-bell-ringing" : "ph ph-bell-slash"}
-          label={notify ? "Notifying when scripts run in the background. Click to turn off" : "Notify me when scripts run in the background"}
-          pressed={notify}
-          onClick={(e) => (e.stopPropagation(), void actions.setNotifyScripts(!notify))}
-        />
-        <IconButton small icon="ph ph-magic-wand" label="Tell AI to wire up my scripts" onClick={(e) => (e.stopPropagation(), setGuide(true))} />
+        <i className="ph ph-folder-simple fold-ico" />
+        <div className="fold-t">
+          <b>{rootName(root)}</b>
+          <span title={root.path}>
+            {groups.length} worktree{groups.length === 1 ? "" : "s"} · {projects} project{projects === 1 ? "" : "s"}
+          </span>
+        </div>
+        {live > 0 ? <span className="sum live">{live} running</span> : null}
       </div>
       <div className="collapse">
         <div className="in">
-          {projects.map((p) => (
-            <div className="scripts-dir" key={p.id}>
-              <div
-                className="scripts-dir-h"
-                onContextMenu={(e) => menu.show(e, [{ label: "Copy path", icon: "ph ph-copy", run: () => menu.copy(p.path, "Path") }])}
-              >
-                <i className="ph ph-folder-simple" />
-                <span className="nm">{p.repo}</span>
-              </div>
-              <ul className="apps">
-                {p.apps.map((a) => {
-                  const id = instanceId(p.id, a.id);
-                  return (
-                    <AppRow
-                      key={a.id}
-                      project={p}
-                      app={a}
-                      state={snap.states[id]}
-                      port={a.port ?? snap.ports[id]}
-                      marked={snap.marked.includes(id)}
-                      watched={snap.watched.includes(watchKey(p, a))}
-                      presets={snap.presets}
-                      pinned={snap.pins.apps.includes(id)}
-                      onSolo={onSolo}
-                    />
-                  );
-                })}
-              </ul>
-            </div>
+          {groups.map((g) => (
+            <GroupBlock key={g.id} group={g} snap={snap} onSolo={onSolo} expand={expand} />
           ))}
-          {count === 0 && (
-            <div className="scripts-none">
-              <p>No scripts yet. Your AI agent can declare the ones you run by hand, so they show up here and you can watch them run.</p>
-              <button type="button" className="empty-act" onClick={() => setGuide(true)}>
-                <i className="ph ph-magic-wand" /> Tell AI to wire up my scripts
-              </button>
-            </div>
-          )}
         </div>
       </div>
-      {guide && <ScriptsGuide roots={snap.roots} onClose={() => setGuide(false)} onToast={onToast} />}
-    </section>
+    </div>
   );
 }
 
@@ -563,13 +516,15 @@ function PinnedApps({
   const q = query.trim().toLowerCase();
   const rows = snap.pins.apps.flatMap((id) => {
     if (keep && !keep(id)) return [];
-    for (const g of snap.groups)
+    for (const g of snap.groups) {
+      if (g.scripts) continue;
       for (const p of g.projects)
         for (const a of p.apps)
           if (instanceId(p.id, a.id) === id) {
             const where = g.main ? `${p.repo} · main` : `${p.repo} · ${g.label}`;
             return `${a.name} ${where}`.toLowerCase().includes(q) ? [{ id, p, a, where }] : [];
           }
+    }
     return [];
   });
   if (recent) rows.sort((a, b) => (snap.lastRun[b.id] ?? 0) - (snap.lastRun[a.id] ?? 0));
@@ -591,7 +546,6 @@ function PinnedApps({
             port={a.port ?? snap.ports[id]}
             marked={snap.marked.includes(id)}
             watched={snap.watched.includes(watchKey(p, a))}
-            presets={snap.presets}
             pinned
             where={where}
             onSolo={onSolo}
@@ -669,7 +623,7 @@ function filterGroups(groups: Group[], query: string): Group[] {
   });
 }
 
-export function Sidebar({ snap, theme, onSolo, onTheme, onGuide, onLogoClick, onToast }: Props) {
+export function Sidebar({ snap, theme, onSolo, onTheme, onGuide, onLogoClick }: Props) {
   const [query, setQuery] = useState("");
   const { text, flags } = useMemo(() => parseQuery(query), [query]);
   const recent = flags.has("recent");
@@ -691,7 +645,26 @@ export function Sidebar({ snap, theme, onSolo, onTheme, onGuide, onLogoClick, on
     return [...found].sort((a, b) => rank(a) - rank(b));
   }, [listed, snap.pins.groups, snap.concluding, snap.lastRun, text, keep, recent]);
   const worktrees = useMemo(() => groups.filter((g) => !g.scripts), [groups]);
-  const scripts = useMemo(() => groups.filter((g) => g.scripts), [groups]);
+  // The tree reads folder first: the worktrees a scan folder holds, and inside each its projects.
+  const folders = useMemo(() => {
+    const known = new Set(snap.roots.map((r) => r.path));
+    const byRoot = new Map<string, Group[]>();
+    const extra: Group[] = [];
+    for (const g of worktrees) {
+      if (!known.has(g.rootPath)) {
+        extra.push(g);
+        continue;
+      }
+      const list = byRoot.get(g.rootPath) ?? [];
+      list.push(g);
+      byRoot.set(g.rootPath, list);
+    }
+    const out = snap.roots
+      .map((root) => ({ key: root.path, root, groups: byRoot.get(root.path) ?? [] }))
+      .filter((f) => f.groups.length > 0);
+    if (extra.length) out.push({ key: "other", root: { path: "", label: "Other folders" }, groups: extra });
+    return out;
+  }, [worktrees, snap.roots]);
   const liveApps = useMemo(
     () => worktrees.reduce((n, g) => n + g.projects.reduce((m, p) => m + p.apps.filter((a) => isActive(snap.states[instanceId(p.id, a.id)])).length, 0), 0),
     [worktrees, snap.states],
@@ -701,7 +674,7 @@ export function Sidebar({ snap, theme, onSolo, onTheme, onGuide, onLogoClick, on
 
   return (
     <aside className="rail" id="rail">
-      <div className="rail-head" data-tauri-drag-region>
+      <div className="rail-head" onMouseDown={startWindowDrag} onDoubleClick={toggleWindowMaximize}>
         <h1>
           <img className="brand" src={logo} alt="" width={20} height={20} draggable={false} onClick={onLogoClick} />
           Spawner
@@ -738,17 +711,13 @@ export function Sidebar({ snap, theme, onSolo, onTheme, onGuide, onLogoClick, on
         <div className="tree-in">
           <ReviewRail snap={snap} query={text} />
           <PinnedApps snap={snap} query={text} onSolo={onSolo} keep={keep} recent={recent} />
-          {snap.scanned && !snap.loading && snap.roots.length > 0 && (
-            <Scripts groups={scripts} snap={snap} onSolo={onSolo} onToast={onToast} filtering={keep !== null || text !== ""} />
-          )}
           <AllApps open={allOpen} onToggle={() => setAllOpen(!allOpen)} count={worktrees.length} live={liveApps} current={snap.selectedWorktree === null}>
-            {worktrees.map((g) => (
-              <GroupBlock key={g.id} group={g} snap={snap} onSolo={onSolo} expand={keep !== null} />
+            {folders.map((f) => (
+              <FolderBlock key={f.key} root={f.root} groups={f.groups} snap={snap} onSolo={onSolo} expand={keep !== null} />
             ))}
             {(snap.loading || (!snap.scanned && snap.roots.length > 0)) && <ScanningRows />}
             {groups.length === 0 && snap.groups.length > 0 && (keep || text) && <p className="empty">No apps match.</p>}
           </AllApps>
-          <Presets snap={snap} />
           {!snap.loading && snap.roots.length === 0 && (
             <div className="empty">
               <p>Add a folder to get started. Spawner scans it for repos, git worktrees and projects you can run.</p>

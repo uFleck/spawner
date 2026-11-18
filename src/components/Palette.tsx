@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { instanceId, isActive, rootName } from "../api";
-import { resolvePreset, targetLabel } from "../presets";
 import { actions, type Snapshot } from "../store";
 
 interface Command {
@@ -29,6 +28,7 @@ export function Palette({ open, snap, onClose, onToggleSide, onTheme, onToast, o
   const commands = useMemo<Command[]>(() => {
     const list: Command[] = [];
     for (const g of snap.groups) {
+      if (g.scripts) continue;
       const where = g.main ? "main" : g.label;
       for (const p of g.projects)
         for (const a of p.apps) {
@@ -45,16 +45,6 @@ export function Palette({ open, snap, onClose, onToggleSide, onTheme, onToast, o
     list.unshift(
       { group: "All apps", icon: "ph ph-arrow-clockwise", label: "Restart all", run: () => void actions.restartAll() },
       { group: "All apps", icon: "ph ph-stop", label: "Stop all", run: () => void actions.stopAll() },
-      ...snap.presets.map((p): Command => {
-        const { hits } = resolvePreset(p, snap.groups);
-        const up = hits.length > 0 && hits.every((h) => isActive(snap.states[h.instance]));
-        return {
-          group: "Presets",
-          icon: up ? "ph ph-stop" : "ph ph-play",
-          label: `${up ? "Stop" : "Run"} preset ${p.name} @ ${targetLabel(p, snap.groups)}`,
-          run: () => void (up ? actions.stopPreset(p) : actions.runPreset(p)),
-        };
-      }),
     );
     list.push(
       { group: "Logs", icon: "ph ph-trash", label: "Clear logs", kbd: "Ctrl L", run: () => void actions.clearLogs() },
@@ -71,7 +61,7 @@ export function Palette({ open, snap, onClose, onToggleSide, onTheme, onToast, o
       { group: "Hub", icon: "ph ph-arrow-clockwise", label: "Rescan folders", run: () => void actions.refresh() },
     );
     return list;
-  }, [snap.groups, snap.states, snap.roots, snap.presets, onToggleSide, onTheme, onGuide]);
+  }, [snap.groups, snap.states, snap.roots, onToggleSide, onTheme, onGuide]);
 
   const items = useMemo(() => {
     const q = query.trim().toLowerCase();

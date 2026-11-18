@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { isActive, type Group, type ResolvedStack, type StackApp } from "../api";
 import { actions, type Snapshot } from "../store";
+import { Dialog } from "./ConcludeDialog";
 import { IconButton } from "./IconButton";
 
 interface Props {
@@ -221,6 +222,53 @@ function aiPrompt(group: Group, stack: ResolvedStack): string {
 }
 
 /**
+ * What "Copy AI prompt" puts on the clipboard, shown before it is copied: the manifest, the port rule and the apps
+ * Spawner already detected.
+ */
+function PromptDialog({ prompt, onClose, onToast }: { prompt: string; onClose: () => void; onToast: (text: string) => void }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    void navigator.clipboard.writeText(prompt).then(
+      () => {
+        setCopied(true);
+        onToast("AI prompt copied");
+      },
+      () => onToast("Could not copy to the clipboard"),
+    );
+  };
+  return (
+    <Dialog
+      tone="ask"
+      icon="ph ph-stack-plus"
+      title="AI prompt for a stack"
+      lead="This is exactly what the copy button puts on your clipboard: the file to write, the ports rule, and the apps Spawner already found."
+      onClose={onClose}
+      footer={
+        <>
+          <span className="grow" />
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Close
+          </button>
+          <button type="button" className="btn btn-primary" data-first onClick={copy}>
+            <i className={copied ? "ph-bold ph-check" : "ph ph-copy"} aria-hidden="true" />
+            {copied ? "Copied" : "Copy prompt"}
+          </button>
+        </>
+      }
+    >
+      <div className="copybox">
+        <pre>{prompt}</pre>
+      </div>
+      <p className="dlg-note">
+        <i className="ph ph-info" aria-hidden="true" />
+        Ports here are repo defaults. A port changed in Spawner is an override kept in its app data, never written to
+        this file or committed.
+      </p>
+    </Dialog>
+  );
+}
+
+/**
  * The stack of the selected worktree: the manifest it came from, every app with its port, the per-app controls, the
  * overrides, and what to do about a busy port or a repo that has no manifest yet.
  */
@@ -228,11 +276,16 @@ export function StackCard({ snap, group, stack, onToast }: Props) {
   const [editing, setEditing] = useState(false);
   /** The app whose port field should take focus when editing opens, from the conflict's "Edit port". */
   const [focus, setFocus] = useState<string | null>(null);
-  /** Detected apps the user unticked on the no-stack card, so "Use detected apps" writes only the rest. */
-  const [dropped, setDropped] = useState<Set<string>>(() => new Set());
+  /** Apps picked on the no-stack card. Null means the defaults: the apps already running here, else all detected. */
+  const [picked, setPicked] = useState<Set<string> | null>(null);
+  /** Whether the AI prompt is being previewed. */
+  const [prompt, setPrompt] = useState(false);
   /** Narrow windows fold the app list to its header line, so the logs keep the height; CSS ignores it when wide. */
   const [folded, setFolded] = useState(() => matchMedia("(max-width: 959px)").matches);
-  useEffect(() => setDropped(new Set()), [group.id]);
+  useEffect(() => {
+    setPicked(null);
+    setPrompt(false);
+  }, [group.id]);
 
   if (!stack) {
     return (
@@ -250,16 +303,18 @@ export function StackCard({ snap, group, stack, onToast }: Props) {
     );
   }
 
-  const copy = (text: string, what: string) => {
-    void navigator.clipboard.writeText(text).then(
-      () => onToast(`${what} copied`),
-      () => onToast("Could not copy to the clipboard"),
-    );
-  };
-
   if (!stack.source) {
     const detected = stack.detected;
-    const picked = detected.filter((d) => !dropped.has(d.instance));
+    // A stack is saved from what is already running here, like the old "new preset from running apps"; with nothing
+    // running, every detected app is ticked.
+    const running = detected.filter((d) => isActive(snap.states[d.instance]));
+    const chosen = picked ?? new Set((running.length ? running : detected).map((d) => d.instance));
+    const toggle = (id: string) => {
+      const next = new Set(chosen);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      setPicked(next);
+    };
     return (
       <section className="stack" aria-label="Stack">
         <div className="nostack">
@@ -275,15 +330,8 @@ export function StackCard({ snap, group, stack, onToast }: Props) {
               <label className="pk" key={d.instance} title={`${d.app} · ${d.kind}${d.port != null ? ` :${d.port}` : ""}`}>
                 <input
                   type="checkbox"
-                  checked={!dropped.has(d.instance)}
-                  onChange={() =>
-                    setDropped((old) => {
-                      const next = new Set(old);
-                      if (next.has(d.instance)) next.delete(d.instance);
-                      else next.add(d.instance);
-                      return next;
-                    })
-                  }
+                  checked={chosen.has(d.instance)}
+                  onChange={() => toggle(d.instance)}
                 />
                 <span className="nm">{d.app}</span>
                 <small>
@@ -294,19 +342,25 @@ export function StackCard({ snap, group, stack, onToast }: Props) {
             ))}
             {detected.length === 0 && <span className="muted">No service app found in this worktree.</span>}
           </div>
+          {running.length > 0 && detected.length > running.length ? (
+            <p className="pick-note">
+              <i className="ph ph-info" aria-hidden="true" /> Ticked are the apps running here; tick the rest to add
+              them.
+            </p>
+          ) : null}
           <div className="row2">
             <button
               type="button"
               className="btn btn-primary sm"
-              disabled={snap.stackBusy || picked.length === 0}
-              onClick={() => void actions.writeStack(group.id, picked.map((d) => d.app))}
+              disabled={snap.stackBusy || chosen.size === 0}
+              onClick={() => void actions.writeStack(group.id, detected.filter((d) => chosen.has(d.instance)).map((d) => d.app))}
             >
-              <i className="ph ph-check" />
-              Use detected apps
+              <i className="ph ph-stack-plus" />
+              Save as stack
             </button>
-            <button type="button" className="btn btn-ghost sm" onClick={() => copy(aiPrompt(group, stack), "AI prompt")}>
+            <button type="button" className="btn btn-ghost sm" onClick={() => setPrompt(true)}>
               <i className="ph ph-copy" />
-              Copy AI prompt
+              Copy AI prompt…
             </button>
           </div>
         </div>
@@ -315,6 +369,7 @@ export function StackCard({ snap, group, stack, onToast }: Props) {
             <i className="ph ph-warning-circle" /> {snap.stackError}
           </p>
         ) : null}
+        {prompt && <PromptDialog prompt={aiPrompt(group, stack)} onClose={() => setPrompt(false)} onToast={onToast} />}
       </section>
     );
   }

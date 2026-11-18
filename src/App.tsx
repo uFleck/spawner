@@ -254,7 +254,6 @@ export default function App() {
         onTheme={toggleTheme}
         onGuide={() => setGuide(true)}
         onLogoClick={onLogoClick}
-        onToast={showToast}
       />
       <div className="main">
         {worktree ? (

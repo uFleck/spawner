@@ -193,27 +193,6 @@ button { font: inherit; color: inherit; }
 .sum.bad { color: var(--err); background: color-mix(in srgb, var(--err) 14%, transparent); }
 
 /* folders list */
-.presets { flex: none; margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid var(--border-default); }
-.presets-h { display: flex; align-items: center; gap: 4px; min-height: 30px; padding: 0 2px 0 4px; border-radius: var(--r); cursor: pointer; font: 600 11px/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-tertiary); transition: background var(--fast); }
-.presets-h:hover { background: var(--hover-tint); }
-.presets-h .t { flex: 1; }
-.presets.closed .caret { transform: rotate(-90deg); }
-.preset-list { list-style: none; margin: 0; padding: 0; max-height: 200px; overflow: auto; }
-.preset-row { display: flex; align-items: center; gap: 10px; min-height: var(--row-h); padding: 4px 2px 4px 8px; border-radius: var(--r); transition: background var(--fast); }
-.preset-row:hover { background: var(--hover-tint); }
-.preset-row .meta { flex: 1; min-width: 0; }
-.preset-row .nm { font: 500 13.5px/1.25 var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.preset-row .sub { display: flex; align-items: center; gap: 4px; font: 400 11.5px/1.3 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; }
-.preset-row .sub .mem { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.preset-row .sub a { flex: none; color: var(--text-secondary); text-decoration: none; border-bottom: 1px solid transparent; transition: all 0.2s; }
-.preset-row .sub a:hover { color: var(--accent-text); border-bottom-color: currentColor; }
-.preset-row .warn-text { flex: none; color: var(--warn); }
-.preset-row .acts { display: flex; align-items: center; flex: none; }
-.preset-row .ib.hov { opacity: 0; transition: opacity var(--fast); }
-.preset-row:hover .ib.hov, .preset-row .ib.hov:focus-visible { opacity: 1; }
-.preset-row.editing { gap: 8px; color: var(--text-tertiary); }
-.preset-row.editing input { width: 100%; height: 24px; padding: 0 6px; border: 1px solid var(--accent); border-radius: var(--r); outline: 0; box-shadow: var(--ring); background: transparent; color: var(--text-primary); font: 500 13px var(--font-ui); }
-.preset-row.editing .sub { margin-top: 2px; }
 .runbar { display: flex; align-items: center; gap: 2px; flex: none; min-height: 28px; margin-bottom: 4px; padding: 0 2px 0 8px; font: 600 11px/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-tertiary); }
 .runbar span { flex: 1; }
 .runbar span.live { color: var(--ok); }
@@ -239,26 +218,12 @@ button { font: inherit; color: inherit; }
 .root-row .ib { opacity: 0; transition: opacity var(--fast); }
 .root-row:hover .ib, .root-row .ib:focus-visible { opacity: 1; }
 .root-none { padding: 6px 8px; font-size: 12px; color: var(--text-tertiary); }
-.preset-row[data-state="scanning"] .dot { opacity: 0.4; }
-.preset-row .scan-note { flex: none; font-style: italic; }
 .scanning { padding: 6px 0; color: var(--text-tertiary); }
 .scanning-t { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 8px; font: 500 12px/1 var(--font-ui); }
 .skel-row { display: flex; align-items: center; gap: 10px; min-height: var(--row-h); padding: 0 8px; }
 .skel-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--hover-tint); flex: none; }
 .skel-bar { height: 10px; border-radius: var(--r); background: var(--hover-tint); animation: skel-pulse 1.4s ease-in-out infinite; }
 @keyframes skel-pulse { 50% { opacity: 0.45; } }
-.scripts { margin-top: 6px; padding-top: 4px; border-top: 1px dashed var(--border-strong); }
-.scripts-h { display: flex; align-items: center; gap: 4px; min-height: 30px; padding: 0 2px 0 4px; border-radius: var(--r); cursor: pointer; font: 600 11px/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-tertiary); transition: background var(--fast); }
-.scripts-h:hover { background: var(--hover-tint); }
-.scripts-h .t { flex: 1; }
-.scripts-h .n { padding: 0 4px; }
-.scripts.closed .caret { transform: rotate(-90deg); }
-.scripts-bell.on { color: var(--accent-text); }
-.scripts-dir-h { display: flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 8px; color: var(--text-tertiary); font: 500 12px/1 var(--font-ui); }
-.scripts-dir-h .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.scripts .apps { list-style: none; margin: 0; padding: 0; }
-.scripts-none { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 6px 8px 8px; color: var(--text-tertiary); font-size: 12px; line-height: 1.45; }
-.scripts-none p { margin: 0; }
 .app-row .sub .desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-ui); }
 .app-row.broken .nm { color: var(--warn); }
 
@@ -882,15 +847,16 @@ button { font: inherit; color: inherit; }
 .pr-draft { color: var(--text-tertiary); }
 .dots { display: flex; align-items: center; gap: 3px; }
 .dots .dot { width: 6px; height: 6px; }
-/* Run stack, Stop and "no stack" share one width, so the slot never resizes the title beside it. */
-.runbtn, .wt-nostack { min-width: 84px; justify-content: center; }
+/* Run stack, Stop and "no stack" share one width, so the slot never resizes the title beside it. Icon only: the row's
+   width belongs to the worktree and its PR, and the tooltip names the action. */
+.runbtn, .wt-nostack { min-width: 28px; width: 28px; justify-content: center; }
 .runbtn {
-  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px 0 7px;
+  display: inline-flex; align-items: center; height: 24px; padding: 0;
   border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--bg-page); color: var(--text-primary);
-  font: 600 11.5px var(--font-ui); white-space: nowrap; cursor: pointer;
+  white-space: nowrap; cursor: pointer;
   transition: border-color var(--fast), color var(--fast), transform var(--fast);
 }
-.runbtn i { color: var(--accent); }
+.runbtn i { font-size: 13px; color: var(--accent); }
 .runbtn:hover { border-color: var(--accent); }
 .runbtn:active { transform: scale(0.95); }
 .app .rail .runbtn:focus-visible, .app .rail .wt-sec-h.as-btn:focus-visible { outline: 0; box-shadow: var(--ring); }
@@ -898,11 +864,10 @@ button { font: inherit; color: inherit; }
 .runbtn.stop i { color: var(--err); }
 .runbtn.stop:hover { border-color: var(--err); }
 .wt-nostack {
-  display: inline-flex; align-items: center; height: 22px; padding: 0 6px;
+  display: inline-flex; align-items: center; height: 22px; padding: 0;
   border: 1px dashed var(--border-strong); border-radius: var(--r);
-  font: 500 10.5px var(--font-mono); color: var(--text-tertiary); white-space: nowrap;
+  font-size: 12px; color: var(--text-tertiary); white-space: nowrap;
 }
-@container rl (max-width: 265px) { .runbtn .lbl { display: none; } .runbtn, .wt-nostack { min-width: 0; padding: 0 6px; } }
 
 /* the existing tree, folded away under one row */
 .allapps { margin-top: 6px; padding-top: 4px; border-top: 1px dashed var(--border-strong); }
@@ -916,6 +881,20 @@ button { font: inherit; color: inherit; }
 .allapps-h .t { flex: 1; }
 .allapps-h .n { padding: 0 4px; }
 .allapps.closed .caret { transform: rotate(-90deg); }
+
+/* folder → worktree → projects: the tree under All apps */
+.fold-block { margin-bottom: 8px; }
+.fold-h {
+  display: flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 2px;
+  border-radius: var(--r); cursor: pointer; transition: background var(--fast);
+}
+.fold-h:hover { background: var(--hover-tint); }
+.fold-ico { flex: none; font-size: 14px; color: var(--text-secondary); }
+.fold-t { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; padding-left: 2px; }
+.fold-t b { font: 600 12.5px/1.25 var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fold-t span { font: 400 11px/1.3 var(--font-ui); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fold-block.closed > .fold-h .caret { transform: rotate(-90deg); }
+.fold-block > .collapse > .in { padding-left: 10px; }
 
 /* workspace */
 .ws { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
@@ -932,10 +911,17 @@ button { font: inherit; color: inherit; }
 /* A long checkout path keeps its tail (the folder that tells checkouts apart) and loses its head. */
 .ws-meta .sub .path { direction: rtl; text-align: left; opacity: 0.8; }
 .ws-meta .acts { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
+.btn.icon { width: 28px; padding: 0; justify-content: center; gap: 0; }
 .ws .pill {
   display: inline-flex; align-items: center; gap: 5px; flex: none; height: 22px; padding: 0 8px;
-  border: 1px solid var(--border-default); border-radius: var(--r); font: 600 11.5px var(--font-mono); white-space: nowrap;
+  border: 1px solid var(--border-default); border-radius: var(--r); background: transparent; color: var(--text-secondary);
+  font: 600 11.5px var(--font-mono); white-space: nowrap; cursor: pointer;
+  transition: border-color var(--fast), background var(--fast);
 }
+.ws .pill:hover { border-color: currentColor; background: var(--hover-tint); }
+.ws .pill:focus-visible { outline: 0; box-shadow: var(--ring); }
+.ws .pill .ext { font-size: 10px; opacity: 0.55; }
+.ws .pill:hover .ext { opacity: 1; }
 .ws .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border-default)); background: color-mix(in srgb, var(--ok) 8%, transparent); }
 .ws .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--border-default)); background: color-mix(in srgb, var(--warn) 8%, transparent); }
 .ws .pill.bad { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, var(--border-default)); background: color-mix(in srgb, var(--err) 8%, transparent); }
@@ -1056,6 +1042,11 @@ a.port:focus-visible { outline: 0; box-shadow: var(--ring); }
 .pk .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .pk small { flex: none; color: var(--text-tertiary); font: 400 10.5px var(--font-mono); }
 .nostack .row2 { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.pick-note { display: flex; align-items: center; gap: 6px; margin: 0 0 2px; color: var(--text-tertiary); font: 400 11.5px var(--font-ui); }
+.pick-note i { flex: none; }
+/* The prompt is long, so its preview gets a wider sheet than the other dialogs. */
+.dlg:has(.copybox) { width: 660px; }
+.dlg:has(.copybox) .dlg-b { padding-left: 24px; }
 .muted { color: var(--text-tertiary); }
 
 /* the log pane says which worktree it is scoped to, and how to leave */
@@ -1102,6 +1093,6 @@ a.port:focus-visible { outline: 0; box-shadow: var(--ring); }
   .st-apps { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 600px) {
-  .ws-meta .acts .lbl, .st-h .lbl { display: none; }
+  .st-h .lbl { display: none; }
 }
 

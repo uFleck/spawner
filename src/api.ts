@@ -310,7 +310,7 @@ export const api = {
   instanceStates: () => invoke<Record<string, InstanceState>>("instance_states"),
   instancePorts: () => invoke<Record<string, number>>("instance_ports"),
   logsSince: (since: number) => invoke<LogLine[]>("logs_since", { since }),
-  /** The saved presets and pins as JSON, or null before anything was ever saved. */
+  /** The saved UI state as JSON (pins, last-run times and the legacy presets), or null before anything was saved. */
   loadUiState: () => invoke<string | null>("load_ui_state"),
   saveUiState: (json: string) => invoke<void>("save_ui_state", { json }),
   mcpInfo: () => invoke<McpInfo>("mcp_info"),
